@@ -173,6 +173,9 @@ jobs:
         env:
           MAX_MINUTES: ${{ inputs.max_minutes }}
         run: |
+          # lwjgl3ify writes a desktop entry on Linux and aborts if this folder is missing.
+          export XDG_DATA_HOME="$HOME/.local/share"
+          mkdir -p "$XDG_DATA_HOME"
           echo "game_launch $(date +%s)" >> "$WORK/out/timings.txt"
           set +e
           timeout --signal=TERM --kill-after=60 "${MAX_MINUTES}m" \
@@ -295,3 +298,11 @@ jobs:
           path: ${{ env.WORK }}/icons-full.tar.gz
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Fail if no export was produced
+        if: always()
+        run: |
+          if ! ls "$WORK"/oracle/records/*.json >/dev/null 2>&1; then
+            echo "::error title=No export::The game exited without writing an export (exit code ${{ steps.run.outputs.exit_code }})."
+            exit 1
+          fi
