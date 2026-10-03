@@ -1,0 +1,270 @@
+name: Export proof of concept
+
+# Boots the latest GTNH daily build headless on a GitHub-hosted runner, runs the
+# gtnh-calc-oracle exporter (from gtnh-factory-flow, MIT) inside the real client,
+# and reports how long each stage took. Nothing is published; results are uploaded
+# as workflow artifacts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      daily_tag:
+        description: "GTNH-Daily-Builds tag to export (empty = latest)"
+        required: false
+        default: ""
+      render_icons:
+        description: "Render item and fluid icons"
+        type: boolean
+        default: true
+      icon_size:
+        description: "Icon size in pixels"
+        required: false
+        default: "64"
+      max_minutes:
+        description: "Kill the game after this many minutes"
+        required: false
+        default: "300"
+
+permissions:
+  contents: read
+
+env:
+  ORACLE_REPO: jackwrichards/gtnh-factory-flow
+  ORACLE_REF: cc6ac0448b596cc63e0b06f634c068cc2b38d8ee
+  ORACLE_DIR: oracle-src/tools/dataset-pipeline/gtnh-calc-oracle
+  PRISM_BOOTSTRAP_URL: https://github.com/MalTeeez/prism-bootstrap/releases/download/1.0.3/prism-bootstrap-1.0.3-x86_64-unknown-linux-gnu
+  PRISM_BOOTSTRAP_SHA256: 0240c93ec6e7b666b39bdf61032fa795223cdbe5b3c4349cd1fa76ca6346d144
+  WORK: ${{ github.workspace }}/work
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Record start time
+        run: |
+          mkdir -p "$WORK/out"
+          echo "job_start $(date +%s)" > "$WORK/out/timings.txt"
+
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Check out exporter source
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.ORACLE_REPO }}
+          ref: ${{ env.ORACLE_REF }}
+          path: oracle-src
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up JDKs
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: |
+            8
+            17
+            21
+            25
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Build exporter mod
+        working-directory: ${{ env.ORACLE_DIR }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace build -x test
+          ls -la build/libs
+          jar=$(find build/libs -maxdepth 1 -type f -name '*.jar' \
+            ! -name '*-sources.jar' ! -name '*-dev.jar' ! -name '*-preshadow.jar' ! -name '*-dev-preshadow.jar' | head -n1)
+          test -n "$jar"
+          cp "$jar" "$WORK/gtnh-calc-oracle.jar"
+          echo "oracle_built $(date +%s)" >> "$WORK/out/timings.txt"
+
+      - name: Resolve daily build
+        id: daily
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.daily_tag }}
+        run: |
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ]; then
+            tag=$(gh release list -R GTNewHorizons/GTNH-Daily-Builds --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          echo "Using daily build: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "$tag" > "$WORK/out/daily-tag.txt"
+
+      - name: Download and unpack client
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.daily.outputs.tag }}
+        run: |
+          mkdir -p "$WORK/dl" "$WORK/unpacked"
+          gh release download "$TAG" -R GTNewHorizons/GTNH-Daily-Builds -p '*-mmcprism-java17-26.zip' -D "$WORK/dl"
+          ls -la "$WORK/dl"
+          unzip -q "$WORK"/dl/*.zip -d "$WORK/unpacked"
+          rm -f "$WORK"/dl/*.zip
+          pack=$(dirname "$(find "$WORK/unpacked" -maxdepth 3 -name mmc-pack.json | head -n1)")
+          test -d "$pack/.minecraft"
+          mv "$pack" "$WORK/client"
+          echo "client_unpacked $(date +%s)" >> "$WORK/out/timings.txt"
+
+      - name: Install headless dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri xauth libegl1 libegl-mesa0 moreutils
+          curl -sSL -o prism-bootstrap "$PRISM_BOOTSTRAP_URL"
+          echo "$PRISM_BOOTSTRAP_SHA256  prism-bootstrap" | sha256sum -c -
+          chmod +x prism-bootstrap
+          sudo mv prism-bootstrap /usr/local/bin/
+
+      - name: Install client
+        working-directory: ${{ env.WORK }}/client
+        env:
+          RENDER_ICONS: ${{ inputs.render_icons }}
+          ICON_SIZE: ${{ inputs.icon_size }}
+        run: |
+          mkdir -p "$WORK/oracle/records" "$WORK/oracle/icons" "$WORK/oracle/icon-cache" "$WORK/oracle/nei-layouts"
+          args=(
+            --jvm-arg "-Dgtnh.oracle.autorun=true"
+            --jvm-arg "-Dgtnh.oracle.outputDir=$WORK/oracle/records"
+            --jvm-arg "-Dgtnh.oracle.datasetVersionId=$(cat "$WORK/out/daily-tag.txt")"
+          )
+          if [ "$RENDER_ICONS" = "true" ]; then
+            args+=(
+              --jvm-arg "-Dgtnh.oracle.renderIcons=true"
+              --jvm-arg "-Dgtnh.oracle.iconDir=$WORK/oracle/icons"
+              --jvm-arg "-Dgtnh.oracle.iconCacheDir=$WORK/oracle/icon-cache"
+              --jvm-arg "-Dgtnh.oracle.iconSize=$ICON_SIZE"
+              --jvm-arg "-Dgtnh.oracle.neiLayoutDir=$WORK/oracle/nei-layouts"
+              --jvm-arg "-Djava.awt.headless=false"
+            )
+          fi
+          prism-bootstrap . \
+            --platform linux \
+            --headless \
+            --meta-url https://meta.prismlauncher.org/v1/ \
+            --xms 4G \
+            --xmx 10G \
+            "${args[@]}" \
+            --game-dir "$WORK/client/.minecraft"
+          echo "--- launch.env ---"; cat launch.env
+          echo "--- launch.argv (first 5 lines) ---"; head -n5 launch.argv
+          echo "client_installed $(date +%s)" >> "$WORK/out/timings.txt"
+
+      - name: Add exporter to mods
+        run: |
+          cp "$WORK/gtnh-calc-oracle.jar" "$WORK/client/.minecraft/mods/"
+          # Shim from gtnh-factory-flow for AE2FC NEI classes the exporter links against
+          # when the pack's AE2FC does not provide them. Needs a javac that accepts -source 8.
+          PATH="$JAVA_HOME_21_X64/bin:$PATH" bash oracle-src/tools/dataset-pipeline/scripts/install-ae2fc-nei-compat-shim.sh \
+            "$WORK/client/.minecraft" "$WORK/client" "$WORK/shim-work"
+          ls "$WORK/client/.minecraft/mods" | wc -l
+
+      - name: Run exporter in headless client
+        id: run
+        working-directory: ${{ env.WORK }}/client/.minecraft
+        env:
+          MAX_MINUTES: ${{ inputs.max_minutes }}
+        run: |
+          echo "game_launch $(date +%s)" >> "$WORK/out/timings.txt"
+          set +e
+          timeout --signal=TERM --kill-after=60 "${MAX_MINUTES}m" \
+            xvfb-run -a -s "-screen 0 1280x720x24" \
+            bash -c 'mapfile -t argv < "$2"; env $(grep -v "^\s*#" "$1" | xargs) "${argv[0]}" "${argv[@]:1}"' \
+            _ "$WORK/client/launch.env" "$WORK/client/launch.argv" 2>&1 \
+            | ts '%s' > "$WORK/out/client.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "game_exit $(date +%s)" >> "$WORK/out/timings.txt"
+          echo "Game exit code: $rc"
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          tail -n 60 "$WORK/out/client.log"
+
+      - name: Summarize
+        if: always()
+        run: |
+          out="$WORK/out"
+          log="$out/client.log"
+          milestone() { # name, pattern: first log line matching pattern
+            local t
+            t=$(grep -m1 -E "$2" "$log" 2>/dev/null | cut -d' ' -f1)
+            [ -n "$t" ] && echo "$1 $t" >> "$out/timings.txt"
+          }
+          if [ -f "$log" ]; then
+            milestone forge_loaded 'Forge Mod Loader has successfully loaded'
+            milestone export_started 'GTNH calculation oracle export started'
+            milestone export_written 'GTNH calculation oracle export wrote'
+            milestone icons_finished 'GTNH calculation oracle icon export finished'
+          fi
+          start=$(awk '$1=="game_launch"{print $2}' "$out/timings.txt")
+          {
+            echo "## Export proof of concept"
+            echo
+            echo "Daily build: \`$(cat "$out/daily-tag.txt" 2>/dev/null)\`  "
+            echo "Game exit code: \`${{ steps.run.outputs.exit_code }}\`"
+            echo
+            echo "| Milestone | Seconds since game launch |"
+            echo "|---|---|"
+            while read -r name t; do
+              if [ -n "$start" ] && [ -n "$t" ]; then
+                echo "| $name | $((t - start)) |"
+              fi
+            done < "$out/timings.txt"
+            echo
+            echo "**Export summary line:**"
+            echo '```'
+            grep -m1 'GTNH calculation oracle export wrote' "$log" 2>/dev/null | cut -d' ' -f2- || true
+            echo '```'
+            echo
+            echo "| Output | Value |"
+            echo "|---|---|"
+            echo "| Rendered icon files | $(find "$WORK/oracle/icons" -type f 2>/dev/null | wc -l) |"
+            echo "| Icon dir size | $(du -sh "$WORK/oracle/icons" 2>/dev/null | cut -f1) |"
+            echo "| NEI layout files | $(find "$WORK/oracle/nei-layouts" -type f 2>/dev/null | wc -l) |"
+            echo "| Export JSON size | $(du -ch "$WORK"/oracle/records/*.json 2>/dev/null | tail -n1 | cut -f1) |"
+            echo "| Crash reports | $(ls "$WORK/client/.minecraft/crash-reports" 2>/dev/null | wc -l) |"
+            echo "| Peak disk used | $(df -h / | awk 'NR==2{print $3}') |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Package results
+        if: always()
+        run: |
+          out="$WORK/out"
+          cp -r "$WORK/client/.minecraft/crash-reports" "$out/" 2>/dev/null || true
+          cp "$WORK/client/.minecraft/logs/fml-client-latest.log" "$out/" 2>/dev/null || true
+          gzip -9 -k "$out/client.log" 2>/dev/null || true
+          if ls "$WORK"/oracle/records/*.json >/dev/null 2>&1; then
+            tar -C "$WORK/oracle" -czf "$out/oracle-records.tar.gz" records
+          fi
+          # A sample of icons to eyeball quality; the full set is uploaded separately.
+          find "$WORK/oracle/icons" -type f -name '*.png' 2>/dev/null | head -n 300 > "$WORK/icon-sample.txt"
+          if [ -s "$WORK/icon-sample.txt" ]; then
+            tar -czf "$out/icon-sample.tar.gz" -T "$WORK/icon-sample.txt"
+            tar -C "$WORK/oracle" -czf "$WORK/icons-full.tar.gz" icons nei-layouts
+          fi
+          rm -f "$out/client.log"
+          ls -la "$out"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: export-poc-results
+          path: ${{ env.WORK }}/out
+          retention-days: 7
+
+      - name: Upload full icon set
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: export-poc-icons
+          path: ${{ env.WORK }}/icons-full.tar.gz
+          if-no-files-found: ignore
+          retention-days: 7
