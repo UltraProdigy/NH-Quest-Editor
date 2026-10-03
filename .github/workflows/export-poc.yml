@@ -153,7 +153,7 @@ jobs:
             --xms 4G \
             --xmx 10G \
             "${args[@]}" \
-            --game-dir "$WORK/client/.minecraft"
+            --game-dir "$WORK/client/.minecraft" 2>&1 | tee "$WORK/install-client.log"
           echo "--- launch.env ---"; cat launch.env
           echo "--- launch.argv (first 5 lines) ---"; head -n5 launch.argv
           echo "client_installed $(date +%s)" >> "$WORK/out/timings.txt"
@@ -194,8 +194,8 @@ jobs:
           log="$out/client.log"
           milestone() { # name, pattern: first log line matching pattern
             local t
-            t=$(grep -m1 -E "$2" "$log" 2>/dev/null | cut -d' ' -f1)
-            [ -n "$t" ] && echo "$1 $t" >> "$out/timings.txt"
+            t=$(grep -m1 -E "$2" "$log" 2>/dev/null | cut -d' ' -f1 || true)
+            if [ -n "$t" ]; then echo "$1 $t" >> "$out/timings.txt"; fi
           }
           if [ -f "$log" ]; then
             milestone forge_loaded 'Forge Mod Loader has successfully loaded'
@@ -233,6 +233,33 @@ jobs:
             echo "| Peak disk used | $(df -h / | awk 'NR==2{print $3}') |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Report diagnostics as annotations
+        if: always()
+        run: |
+          # Annotations are readable through the API without downloading logs.
+          annotate() { # title, file, max bytes (keeps the end of the file)
+            [ -s "$2" ] || return 0
+            local body
+            body=$(tail -c "$3" "$2" | sed 's/%/%25/g; s/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')
+            echo "::notice title=$1::$body"
+          }
+          out="$WORK/out"
+          log="$out/client.log"
+          annotate "timings" "$out/timings.txt" 4000
+          cp "$WORK/install-client.log" "$WORK/diag-install.txt" 2>/dev/null || true
+          annotate "install client output" "$WORK/diag-install.txt" 6000
+          if [ -f "$log" ]; then
+            grep -E 'Exception|Error|FATAL|Caused by|oracle' "$log" | cut -c1-400 | awk '!seen[substr($0, index($0," "))]++' | head -n 150 > "$WORK/diag-errors.txt" || true
+            annotate "errors and oracle lines" "$WORK/diag-errors.txt" 20000
+            tail -n 120 "$log" | cut -c1-400 > "$WORK/diag-tail.txt"
+            annotate "client log tail" "$WORK/diag-tail.txt" 20000
+          fi
+          crash=$(ls -t "$WORK/client/.minecraft/crash-reports"/*.txt 2>/dev/null | head -n1 || true)
+          if [ -n "$crash" ]; then
+            head -n 150 "$crash" | cut -c1-400 > "$WORK/diag-crash.txt"
+            annotate "crash report" "$WORK/diag-crash.txt" 20000
+          fi
+
       - name: Package results
         if: always()
         run: |
@@ -254,7 +281,7 @@ jobs:
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: export-poc-results
           path: ${{ env.WORK }}/out
@@ -262,7 +289,7 @@ jobs:
 
       - name: Upload full icon set
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: export-poc-icons
           path: ${{ env.WORK }}/icons-full.tar.gz
