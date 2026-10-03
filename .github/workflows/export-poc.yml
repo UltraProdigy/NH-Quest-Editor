@@ -47,7 +47,8 @@ env:
   HEADLESSNH_SHA256: f1da0976f3b3af1258de803c62534464dc45167aa4b07ae43e27ad1cc72f6e1b
   PRISM_BOOTSTRAP_URL: https://github.com/MalTeeez/prism-bootstrap/releases/download/1.0.3/prism-bootstrap-1.0.3-x86_64-unknown-linux-gnu
   PRISM_BOOTSTRAP_SHA256: 0240c93ec6e7b666b39bdf61032fa795223cdbe5b3c4349cd1fa76ca6346d144
-  WORK: ${{ github.workspace }}/work
+  # Outside the checkout, which actions/checkout cleans.
+  WORK: ${{ github.workspace }}/../export-work
 
 jobs:
   export:
@@ -88,7 +89,7 @@ jobs:
         working-directory: ${{ env.ORACLE_DIR }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace build -x test
+          ./gradlew --no-daemon --stacktrace build -x test 2>&1 | tee "$WORK/out/build.log"
           ls -la build/libs
           jar=$(find build/libs -maxdepth 1 -type f -name '*.jar' \
             ! -name '*-sources.jar' ! -name '*-dev.jar' ! -name '*-preshadow.jar' ! -name '*-dev-preshadow.jar' | head -n1)
@@ -236,6 +237,7 @@ jobs:
         if: always()
         run: |
           out="$WORK/out"
+          mkdir -p "$out"
           log="$out/client.log"
           milestone() { # name, pattern: first log line matching pattern
             local t
@@ -289,7 +291,13 @@ jobs:
             echo "::notice title=$1::$body"
           }
           out="$WORK/out"
+          mkdir -p "$out"
           log="$out/client.log"
+          if [ -f "$out/build.log" ] && ! grep -q 'BUILD SUCCESSFUL' "$out/build.log"; then
+            grep -E 'error:|FAILURE|What went wrong|^> |\.java:[0-9]+' "$out/build.log" | head -n 120 > "$WORK/diag-build.txt" || true
+            tail -n 60 "$out/build.log" >> "$WORK/diag-build.txt"
+            annotate "build errors" "$WORK/diag-build.txt" 20000
+          fi
           {
             cat "$out/timings.txt"
             grep -m1 'GTNH calculation oracle export wrote' "$log" 2>/dev/null | sed 's/.*oracle export wrote/export wrote/' || true
@@ -344,6 +352,7 @@ jobs:
         if: always()
         run: |
           out="$WORK/out"
+          mkdir -p "$out"
           cp -r "$WORK/client/.minecraft/crash-reports" "$out/" 2>/dev/null || true
           cp "$WORK/client/.minecraft/logs/fml-client-latest.log" "$out/" 2>/dev/null || true
           gzip -9 -k "$out/client.log" 2>/dev/null || true
