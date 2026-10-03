@@ -1,0 +1,23 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node / site build
+node_modules/
+dist/
+.vite/
+
+# Gradle / Java (exporter mod)
+.gradle/
+build/
+out/
+run/
+
+# Local export data
+/work/
+*.log
