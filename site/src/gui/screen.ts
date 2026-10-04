@@ -180,7 +180,7 @@ export class Host {
   canvas: HTMLCanvasElement;
   gfx: Gfx;
   screen: Screen | null = null;
-  /** 0 = auto (Minecraft's rule), otherwise a fixed GUI scale. */
+  /** 0 = auto (half of Minecraft's auto scale), otherwise a fixed GUI scale. */
   scaleSetting = 0;
   scale = 2;
   private mx = -1;
@@ -292,15 +292,26 @@ export class Host {
     return s;
   }
 
+  /**
+   * The automatic GUI scale. Minecraft's own rule (the largest scale that keeps 320x240 GUI
+   * pixels) is huge on big monitors, and players usually pick about half of it (3 at 1440p), so
+   * auto uses half. On high-density screens (phones) it keeps at least 1.5 device pixels per CSS
+   * pixel so text stays readable.
+   */
+  autoScale() {
+    const dpr = window.devicePixelRatio || 1;
+    const max = this.maxScale();
+    return Math.max(1, Math.min(max, Math.max(Math.round(max / 2), Math.ceil(1.5 * dpr))));
+  }
+
   private relayout() {
     const dpr = window.devicePixelRatio || 1;
     const W = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
     const H = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
     if (this.canvas.width !== W) this.canvas.width = W;
     if (this.canvas.height !== H) this.canvas.height = H;
-    // ScaledResolution: the largest scale that keeps at least 320x240 GUI pixels.
-    const max = this.maxScale();
-    this.scale = this.scaleSetting > 0 ? Math.min(this.scaleSetting, max) : max;
+    // ScaledResolution never goes past the largest scale that keeps at least 320x240 GUI pixels.
+    this.scale = this.scaleSetting > 0 ? Math.min(this.scaleSetting, this.maxScale()) : this.autoScale();
     this.w = Math.ceil(W / this.scale);
     this.h = Math.ceil(H / this.scale);
     this.gfx.g.imageSmoothingEnabled = false;
