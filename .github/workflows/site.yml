@@ -139,6 +139,8 @@ jobs:
 
   deploy:
     needs: build
+    # build ran under always(), so a skipped export upstream would otherwise skip this job too.
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       pages: write
