@@ -20,7 +20,7 @@ on:
         default: true
       icon_size:
         type: string
-        default: "64"
+        default: "256"
       max_minutes:
         type: string
         default: "300"
@@ -48,9 +48,9 @@ on:
         type: boolean
         default: true
       icon_size:
-        description: "Icon size in pixels"
+        description: "Icon size in pixels (the image is a 32-unit canvas, so 256 = 8 px per GUI unit)"
         required: false
-        default: "64"
+        default: "256"
       max_minutes:
         description: "Kill the game after this many minutes"
         required: false
