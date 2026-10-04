@@ -117,7 +117,9 @@ function drawPlaceholder(gfx: Gfx, x: number, y: number, size: number) {
  */
 export function drawItemKey(gfx: Gfx, key: string, x: number, y: number, size = 16, text = '') {
   const img = iconImage(key);
-  if (img) gfx.imageSmooth(img, x, y, size, size);
+  // Exported icons are a 32-unit canvas with the 16-unit item in the middle (room for renders
+  // that spill out of their slot), so the slot is the centre half of the image.
+  if (img) gfx.imageSmooth(img, x - size / 2, y - size / 2, size * 2, size * 2);
   else drawPlaceholder(gfx, x, y, size);
   if (text) {
     gfx.push();
