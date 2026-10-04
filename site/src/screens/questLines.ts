@@ -49,7 +49,7 @@ export class QuestLinesScreen extends Screen {
   private txGlobal!: PanelTextBox;
   private icoChapter!: PanelGeneric;
   private lineButtons: { btn: PanelButton; line: QuestLine }[] = [];
-  private view: { zoom: number; sx: number; sy: number } | null = null;
+  private view: { zoom: number; center: [number, number] } | null = null;
   private pendingFocus: string | null = null;
 
   constructor(parent: Screen | null, lineId?: string, focusQuest?: string) {
@@ -71,9 +71,12 @@ export class QuestLinesScreen extends Screen {
 
   build() {
     // Keep the map position across rebuilds (window resizes).
-    if (this.cvQuest && this.cvQuest.questLine) {
-      this.view = { zoom: this.cvQuest.zoom.read(), sx: this.cvQuest.getScrollX(), sy: this.cvQuest.getScrollY() };
-    }
+    // Keep the viewer's map position across rebuilds (window resizes). A view nobody has moved
+    // is fitted again instead, since it was only fitted to the old size.
+    this.view =
+      this.cvQuest?.questLine && this.cvQuest.userMoved
+        ? { zoom: this.cvQuest.zoom.read(), center: this.cvQuest.center() }
+        : null;
     const firstQuestView = this.firstView && !this.selectedLine && this.selectFirstLine();
     const preOpen = ui.trayLock || firstQuestView;
 
@@ -270,10 +273,10 @@ export class QuestLinesScreen extends Screen {
       this.cvQuest.setQuestLine(this.selectedLine);
       if (this.view) {
         this.cvQuest.setZoom(this.view.zoom);
-        this.cvQuest.setScrollX(this.view.sx);
-        this.cvQuest.setScrollY(this.view.sy);
+        this.cvQuest.centerAt(...this.view.center);
         this.cvQuest.refreshScrollBounds();
         this.cvQuest.updatePanelScroll();
+        this.cvQuest.userMoved = true;
       }
       this.refreshCompletion();
       this.txTitle.setText(mono(this.selectedLine.name));
@@ -382,12 +385,14 @@ export class QuestLinesScreen extends Screen {
   private refreshContent() {
     const zoom = this.cvQuest.zoom.read();
     const sx = this.cvQuest.getScrollX(), sy = this.cvQuest.getScrollY();
+    const moved = this.cvQuest.userMoved;
     this.cvQuest.setQuestLine(this.selectedLine);
     this.cvQuest.setZoom(zoom);
     this.cvQuest.setScrollX(sx);
     this.cvQuest.setScrollY(sy);
     this.cvQuest.refreshScrollBounds();
     this.cvQuest.updatePanelScroll();
+    this.cvQuest.userMoved = moved;
   }
 
   /** Right-click menu on a quest (GuiQuestLines' context menu, minus the in-game actions). */
@@ -455,6 +460,7 @@ export class QuestLinesScreen extends Screen {
       b.highlight = highlightColor();
       this.cvQuest.setZoom(2);
       this.cvQuest.centerOn(b);
+      this.cvQuest.userMoved = true;
     }
   }
 

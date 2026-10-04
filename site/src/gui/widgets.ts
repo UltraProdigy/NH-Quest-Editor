@@ -520,6 +520,8 @@ export class CanvasScrolling extends BasePanel {
   scrollSpeed = 12;
   zoomSpeed = 1.25;
   zoomToCursor = true;
+  /** Set once the viewer drags or zooms; lets screens decide whether to keep or reset the view. */
+  userMoved = false;
   protected dragging = false;
   protected dragged = false;
   private dragSX = 0;
@@ -655,11 +657,11 @@ export class CanvasScrolling extends BasePanel {
       const dy = Math.trunc((this.dragMY - my) / zs);
       if (this.scrollBounds.rw > 0) {
         this.scrollX.write(dx / this.scrollBounds.rw + this.dragSX);
-        if (!this.dragged && Math.abs(this.dragSX - this.scrollX.read()) > 0.05) this.dragged = true;
+        if (!this.dragged && Math.abs(this.dragSX - this.scrollX.read()) > 0.05) this.dragged = this.userMoved = true;
       }
       if (this.scrollBounds.rh > 0) {
         this.scrollY.write(dy / this.scrollBounds.rh + this.dragSY);
-        if (!this.dragged && Math.abs(this.dragSY - this.scrollY.read()) > 0.05) this.dragged = true;
+        if (!this.dragged && Math.abs(this.dragSY - this.scrollY.read()) > 0.05) this.dragged = this.userMoved = true;
       }
     } else if (this.dragging || this.dragged) {
       this.dragging = false;
@@ -753,6 +755,7 @@ export class CanvasScrolling extends BasePanel {
     }
     if (this.zoomMode) {
       const cs = this.zoom.readRaw();
+      this.userMoved = true;
       if (d > 0) this.zoom.write(cs / this.zoomSpeed);
       else if (d < 0) this.zoom.write(cs * this.zoomSpeed);
     } else if (this.scrollBounds.rh > 0) {

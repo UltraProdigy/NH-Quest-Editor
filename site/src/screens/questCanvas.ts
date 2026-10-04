@@ -108,6 +108,7 @@ export class CanvasQuestLine extends CanvasScrolling {
 
   setQuestLine(l: QuestLine | null) {
     this.reset();
+    this.userMoved = false;
     this.buttons = [];
     this.questLine = l;
     if (!l) return;
@@ -167,6 +168,16 @@ export class CanvasQuestLine extends CanvasScrolling {
     this.setScrollX(sb.rx + Math.trunc(sb.rw / 2));
     this.setScrollY(sb.ry + Math.trunc(sb.rh / 2));
     this.updatePanelScroll();
+  }
+
+  /** The canvas point at the middle of the view. */
+  center(): [number, number] {
+    return [this.lsx + Math.trunc(this.window.rw / 2), this.lsy + Math.trunc(this.window.rh / 2)];
+  }
+
+  centerAt(cx: number, cy: number) {
+    this.setScrollX(cx - Math.trunc(this.window.rw / 2));
+    this.setScrollY(cy - Math.trunc(this.window.rh / 2));
   }
 
   centerOn(b: PanelButtonQuest) {
