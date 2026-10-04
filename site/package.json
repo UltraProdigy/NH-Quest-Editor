@@ -1,0 +1,25 @@
+{
+  "name": "nh-quest-editor-site",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test scripts/*.test.ts",
+    "data:vanilla": "node scripts/fetch-vanilla.ts",
+    "data:quests": "node scripts/build-quests.ts",
+    "data:items": "node --max-old-space-size=8192 scripts/build-items.ts",
+    "data:presets": "python3 scripts/extract-bq-presets.py"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2"
+  }
+}

@@ -21,3 +21,9 @@ run/
 # Local export data
 /work/
 *.log
+
+# Site: generated data and assets (built in CI)
+site/public/data/
+site/public/assets/*
+!site/public/assets/betterquesting/
+!site/public/assets/bq_standard/
