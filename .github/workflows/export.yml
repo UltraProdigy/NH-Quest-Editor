@@ -1,17 +1,48 @@
-name: Export proof of concept
+name: Export game data
 
-# Boots the latest GTNH daily build headless on a GitHub-hosted runner, runs the
-# exporter mod in exporter/ (based on gtnh-calc-oracle from gtnh-factory-flow, MIT)
-# inside the real client, and reports how long each stage took. Nothing is published;
-# results are uploaded as workflow artifacts.
+# Boots a GTNH daily build headless on a GitHub-hosted runner, runs the exporter mod in
+# exporter/ (based on gtnh-calc-oracle from gtnh-factory-flow, MIT) inside the real client,
+# and reports how long each stage took. With "publish", the export and icons replace the
+# assets of this repository's "game-data" release, which the site build reads.
+# The site workflow (site.yml) calls this when a new daily build appears.
 
 on:
+  workflow_call:
+    inputs:
+      daily_tag:
+        type: string
+        default: ""
+      publish:
+        type: boolean
+        default: true
+      render_icons:
+        type: boolean
+        default: true
+      icon_size:
+        type: string
+        default: "64"
+      max_minutes:
+        type: string
+        default: "300"
+      icon_renderer:
+        type: string
+        default: nei
+      mipmap_levels:
+        type: string
+        default: "0"
+      enter_world:
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       daily_tag:
         description: "GTNH-Daily-Builds tag to export (empty = latest)"
         required: false
         default: ""
+      publish:
+        description: "Replace the game-data release with this export"
+        type: boolean
+        default: false
       render_icons:
         description: "Render item and fluid icons"
         type: boolean
@@ -39,7 +70,7 @@ on:
         default: true
 
 permissions:
-  contents: read
+  contents: write # publishing the game-data release
 
 env:
   ORACLE_DIR: exporter
@@ -255,7 +286,7 @@ jobs:
           fi
           start=$(awk '$1=="game_launch"{print $2}' "$out/timings.txt")
           {
-            echo "## Export proof of concept"
+            echo "## Game data export"
             echo
             echo "Daily build: \`$(cat "$out/daily-tag.txt" 2>/dev/null)\`  "
             echo "Game exit code: \`${{ steps.run.outputs.exit_code }}\`"
@@ -375,7 +406,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: export-poc-results
+          name: export-results
           path: ${{ env.WORK }}/out
           retention-days: 7
 
@@ -383,7 +414,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: export-poc-icons
+          name: export-icons
           path: ${{ env.WORK }}/icons-full.tar.gz
           if-no-files-found: ignore
           retention-days: 7
@@ -395,3 +426,21 @@ jobs:
             echo "::error title=No export::The game exited without writing an export (exit code ${{ steps.run.outputs.exit_code }})."
             exit 1
           fi
+
+      - name: Publish to the game-data release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          json=$(ls "$WORK"/oracle/records/*.json | head -n1)
+          gzip -6 -c "$json" > "$WORK/export.json.gz"
+          cp "$WORK/out/daily-tag.txt" "$WORK/daily-tag.txt"
+          tag=$(cat "$WORK/daily-tag.txt")
+          if ! gh release view game-data -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create game-data -R "$GITHUB_REPOSITORY" --latest=false \
+              --title "Game data" --notes "Exported from GTNH daily build $tag."
+          fi
+          gh release upload game-data -R "$GITHUB_REPOSITORY" --clobber \
+            "$WORK/export.json.gz" "$WORK/icons-full.tar.gz" "$WORK/daily-tag.txt"
+          gh release edit game-data -R "$GITHUB_REPOSITORY" --notes "Exported from GTNH daily build $tag."
+          echo "Published game data for $tag" >> "$GITHUB_STEP_SUMMARY"

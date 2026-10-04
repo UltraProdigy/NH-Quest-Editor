@@ -1,0 +1,152 @@
+name: Build and deploy site
+
+# Builds the questbook site and publishes it to GitHub Pages.
+#
+# Quest data always comes from the modpack's master branch. Game data (item names and icons)
+# comes from this repository's "game-data" release, which is refreshed by running the
+# exporter (export.yml) whenever GTNH publishes a new daily build. If the export fails, the
+# site still deploys with the previous game data.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "site/**"
+      - ".github/workflows/site.yml"
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+    inputs:
+      export:
+        description: "Run the game-data export"
+        type: choice
+        options: [if-new-daily, always, never]
+        default: if-new-daily
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      export: ${{ steps.check.outputs.export }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - name: Compare the newest daily build with the published game data
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'push' && 'never' || inputs.export || 'if-new-daily' }}
+        run: |
+          latest=$(gh release list -R GTNewHorizons/GTNH-Daily-Builds --limit 1 --json tagName --jq '.[0].tagName')
+          current=$(gh release download game-data -R "$GITHUB_REPOSITORY" -p daily-tag.txt -O - 2>/dev/null || echo none)
+          echo "Newest daily build: $latest, published game data: $current, mode: $MODE"
+          export=false
+          if [ "$MODE" = always ] || { [ "$MODE" = if-new-daily ] && [ "$latest" != "$current" ]; }; then
+            export=true
+          fi
+          echo "export=$export" >> "$GITHUB_OUTPUT"
+          echo "tag=$latest" >> "$GITHUB_OUTPUT"
+          {
+            echo "Newest daily build: \`$latest\`  "
+            echo "Published game data: \`$current\`  "
+            echo "Run export: \`$export\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  export:
+    needs: check
+    if: needs.check.outputs.export == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/export.yml
+    with:
+      daily_tag: ${{ needs.check.outputs.tag }}
+      publish: true
+
+  build:
+    needs: [check, export]
+    # Deploy fresh quest data even when there was no export, or the export failed.
+    if: always() && needs.check.result == 'success'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check out modpack quests
+        uses: actions/checkout@v5
+        with:
+          repository: GTNewHorizons/GT-New-Horizons-Modpack
+          ref: master
+          path: modpack
+          sparse-checkout: config/betterquesting
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Fetch vanilla font from the Minecraft client
+        run: npm run data:vanilla
+
+      - name: Build quest data
+        run: |
+          export QUESTS_REPO=GTNewHorizons/GT-New-Horizons-Modpack
+          export QUESTS_COMMIT=$(git -C ../modpack rev-parse HEAD)
+          export QUESTS_DATE=$(git -C ../modpack log -1 --format=%cI)
+          npm run data:quests -- ../modpack/config/betterquesting/DefaultQuests
+
+      - name: Build item data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ../game-data
+          if gh release download game-data -R "$GITHUB_REPOSITORY" -D ../game-data \
+              -p export.json.gz -p icons-full.tar.gz -p daily-tag.txt; then
+            gunzip ../game-data/export.json.gz
+            tar -xzf ../game-data/icons-full.tar.gz -C ../game-data icons
+            DAILY_TAG=$(cat ../game-data/daily-tag.txt) npm run data:items -- \
+              ../game-data/export.json ../game-data/icons public/data/questbook.json
+          else
+            echo "::warning title=No game data::The game-data release does not exist yet; items show placeholders."
+          fi
+
+      - name: Build site
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
