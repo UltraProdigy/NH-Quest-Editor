@@ -5,7 +5,7 @@
 
 import { texture as loadTexture } from './assets.ts';
 import { type GuiColor, staticColor, pulseColor, sequenceColor, parseColorValue, WHITE } from './color.ts';
-import { type Gfx, type GuiRect } from './core.ts';
+import { Gfx, type GuiRect } from './core.ts';
 import { animating } from './frame.ts';
 import presets from './bq-presets.json';
 
@@ -27,7 +27,43 @@ export const enum SliceMode {
   SLICED_STRETCH = 2,
 }
 
+// Large tiled panels are drawn once into an offscreen canvas and reused while their size, colour
+// and sub-pixel position stay the same. GL draws thousands of small tiles in one batch, but a 2D
+// canvas pays for every drawImage, and at small GUI scales a full-screen panel is ~10k tiles.
+const TILE_CACHE_MIN_QUADS = 32;
+const TILE_CACHE_MAX_PIXELS = 24_000_000;
+const tileCache = new Map<string, HTMLCanvasElement>();
+let tileCachePixels = 0;
+let sliceIds = 0;
+/** Set while a cached panel is being painted, so that drawing does not use the cache again. */
+let paintingTiles = false;
+
+function cachedTiles(key: string, w: number, h: number, paint: (g: CanvasRenderingContext2D) => void) {
+  let c = tileCache.get(key);
+  if (c) {
+    // Keep recently used entries at the end (evicted last).
+    tileCache.delete(key);
+    tileCache.set(key, c);
+    return c;
+  }
+  c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d')!;
+  g.imageSmoothingEnabled = false;
+  paint(g);
+  tileCache.set(key, c);
+  tileCachePixels += w * h;
+  for (const [k, old] of tileCache) {
+    if (tileCachePixels <= TILE_CACHE_MAX_PIXELS || old === c) break;
+    tileCache.delete(k);
+    tileCachePixels -= old.width * old.height;
+  }
+  return c;
+}
+
 export class SlicedTexture implements GuiTexture {
+  private readonly id = ++sliceIds;
   constructor(
     public atlas: string,
     public bounds: [number, number, number, number],
@@ -64,6 +100,31 @@ export class SlicedTexture implements GuiTexture {
         const ch = h - t - b;
         const xPasses = Math.floor(cw / fw), remW = cw % fw;
         const yPasses = Math.floor(ch / fh), remH = ch % fh;
+        if (xPasses * yPasses >= TILE_CACHE_MIN_QUADS && !paintingTiles) {
+          // Draw the same quads into a canvas the size of the device rectangle. Offsetting by whole
+          // device pixels keeps every snapped edge exactly where it would be on screen.
+          const px = gfx.ox + x * gfx.s, py = gfx.oy + y * gfx.s;
+          const x0 = Math.round(px), y0 = Math.round(py);
+          const x1 = gfx.dx(x + width), y1 = gfx.dy(y + height);
+          if (x1 > x0 && y1 > y0) {
+            const fx = (px - x0).toFixed(3), fy = (py - y0).toFixed(3);
+            const key = `${this.id}|${width}x${height}|${gfx.s}|${fx},${fy}|${argb}`;
+            const c = cachedTiles(key, x1 - x0, y1 - y0, (g) => {
+              const off = new Gfx(g);
+              off.ox = gfx.ox - x0;
+              off.oy = gfx.oy - y0;
+              off.s = gfx.s;
+              paintingTiles = true;
+              try {
+                this.draw(off, x, y, width, height, staticColor(argb));
+              } finally {
+                paintingTiles = false;
+              }
+            });
+            gfx.g.drawImage(c, x0, y0);
+            return;
+          }
+        }
         Q(0, 0, l, t, u, v, l, t);
         Q(l + cw, 0, r, t, u + l + fw, v, r, t);
         Q(0, t + ch, l, b, u, v + t + fh, l, b);
