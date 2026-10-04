@@ -27,9 +27,11 @@ import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.RenderBlocks;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.entity.RenderItem;
+import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.shader.Framebuffer;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.client.ForgeHooksClient;
 import net.minecraftforge.oredict.OreDictionary;
 import org.lwjgl.BufferUtils;
@@ -155,6 +157,7 @@ public final class ClientItemStackIconRenderer {
             GL11.glLoadIdentity();
             GL11.glTranslatef(0.0F, 0.0F, -2000.0F);
 
+            forceNearestFiltering(minecraft);
             RenderHelper.enableGUIStandardItemLighting();
             GL11.glEnable(GL12.GL_RESCALE_NORMAL);
             FontRenderer fontRenderer = stack.getItem().getFontRenderer(stack);
@@ -204,6 +207,24 @@ public final class ClientItemStackIconRenderer {
         }
 
         return imageFromRgbaBuffer(buffer);
+    }
+
+    /**
+     * The game samples item and block textures with GL_NEAREST, so texels stay sharp however large the
+     * item is drawn. On the export runner the block atlas came out linearly filtered (anisotropic
+     * filtering or a texture mod), which blurs 3D blocks at icon resolution, so set it back before
+     * every render.
+     */
+    static void forceNearestFiltering(Minecraft minecraft) {
+        ResourceLocation[] atlases = { TextureMap.locationBlocksTexture, TextureMap.locationItemsTexture };
+        for (ResourceLocation atlas : atlases) {
+            minecraft.getTextureManager().bindTexture(atlas);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
+            // GL_TEXTURE_MAX_ANISOTROPY_EXT; an error here only means the extension is missing.
+            GL11.glTexParameterf(GL11.GL_TEXTURE_2D, 0x84FE, 1.0F);
+            GL11.glGetError();
+        }
     }
 
     private static BufferedImage renderWithContainerBaseIfNeeded(ItemStack stack, BufferedImage overlay) {
