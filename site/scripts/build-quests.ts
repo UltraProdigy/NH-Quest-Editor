@@ -1,7 +1,11 @@
 // Builds public/data/questbook.json from a BetterQuesting DefaultQuests folder.
 //
-// Usage: node scripts/build-quests.ts <DefaultQuests dir> [out file]
+// Usage: node scripts/build-quests.ts <DefaultQuests dir> [out file] [--stacks <file>]
 // Optional env: QUESTS_REPO, QUESTS_COMMIT, QUESTS_DATE (recorded as the data source).
+//
+// --stacks writes every distinct item stack the questbook shows (icons, task and reward items),
+// with its NBT exactly as BetterQuesting stores it, for the exporter to render one by one.
+// Stacks with NBT get a key "<id>@<dmg>#<hash>" (ItemRef.k) so the site can find their icon.
 //
 // If the DefaultQuests folder has a sibling "resources" folder (config/betterquesting/resources,
 // where modpacks put custom themes and pictures), its contents are copied to public/assets and
@@ -9,13 +13,17 @@
 
 import { readFileSync, readdirSync, writeFileSync, mkdirSync, statSync, cpSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { parseBq, splitKey, bqList, uuidToB64, NBT } from '../src/lib/bqjson.ts';
 import type { BqObject, BqValue } from '../src/lib/bqjson.ts';
 import type { ItemRef, FluidRef, Quest, QuestLine, QuestbookData, TaskData, PrereqRef, Placement } from '../src/lib/model.ts';
 
-const [, , srcArg, outArg] = process.argv;
-if (!srcArg) {
-  console.error('Usage: node scripts/build-quests.ts <DefaultQuests dir> [out file]');
+const argv = process.argv.slice(2);
+const stacksAt = argv.indexOf('--stacks');
+const stacksArg = stacksAt >= 0 ? argv.splice(stacksAt, 2)[1] : undefined;
+const [srcArg, outArg] = argv;
+if (!srcArg || (stacksAt >= 0 && !stacksArg)) {
+  console.error('Usage: node scripts/build-quests.ts <DefaultQuests dir> [out file] [--stacks <file>]');
   process.exit(2);
 }
 const src = resolve(srcArg);
@@ -61,6 +69,13 @@ function plain(v: BqValue, type = -1): unknown {
   return o;
 }
 
+/** JSON text of a typed BQ value with longs written as plain numbers, as BetterQuesting writes them. */
+export const typedJson = (v: BqValue): string =>
+  JSON.stringify(v, (_k, x) => (typeof x === 'bigint' ? `\u0000${x}` : x)).replace(/"\\u0000(-?\d+)"/g, '$1');
+
+/** Every distinct stack the questbook shows, keyed like the site looks them up. */
+const stacks = new Map<string, { k: string; id: string; dmg: number; tag?: string }>();
+
 function item(v: BqObject): ItemRef {
   const ref: ItemRef = {
     id: String(v['id:8'] ?? ''),
@@ -69,7 +84,16 @@ function item(v: BqObject): ItemRef {
   };
   const ore = v['OreDict:8'];
   if (typeof ore === 'string' && ore) ref.ore = ore;
-  if (isObj(v['tag:10'])) ref.nbt = plain(v['tag:10'], NBT.COMPOUND) as Record<string, unknown>;
+  let tag: string | undefined;
+  if (isObj(v['tag:10'])) {
+    ref.nbt = plain(v['tag:10'], NBT.COMPOUND) as Record<string, unknown>;
+    tag = typedJson(v['tag:10']);
+    ref.k = `${ref.id}@${ref.dmg}#${createHash('sha1').update(tag).digest('hex').slice(0, 12)}`;
+  }
+  if (ref.id && ref.dmg !== 32767) {
+    const k = ref.k ?? `${ref.id}@${ref.dmg}`;
+    if (!stacks.has(k)) stacks.set(k, { k, id: ref.id, dmg: ref.dmg, ...(tag ? { tag } : {}) });
+  }
   return ref;
 }
 
@@ -235,6 +259,14 @@ if (existsSync(resources)) {
   }
 }
 writeFileSync(join(dirname(out), 'themes.json'), JSON.stringify(themes));
+
+if (stacksArg) {
+  // One stack per line; "tag" is BQ's typed NBT JSON text, kept as text so longs stay exact.
+  const list = [...stacks.values()].sort((a, b) => a.k.localeCompare(b.k));
+  mkdirSync(dirname(resolve(stacksArg)), { recursive: true });
+  writeFileSync(resolve(stacksArg), list.map((x) => JSON.stringify(x)).join('\n') + '\n');
+  console.log(`quest stacks: ${list.length} (${list.filter((x) => x.tag).length} with NBT) -> ${resolve(stacksArg)}`);
+}
 
 const missing = orderedLines.flatMap((l) => l.quests.filter((p) => !quests[p[0]]).map((p) => `${l.name}: ${p[0]}`));
 const placed = new Set(orderedLines.flatMap((l) => l.quests.map((p) => p[0])));

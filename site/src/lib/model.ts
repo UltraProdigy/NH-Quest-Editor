@@ -13,6 +13,8 @@ export interface ItemRef {
   ore?: string;
   /** NBT tag with type suffixes removed (longs as strings). */
   nbt?: Record<string, unknown>;
+  /** Stack key "<id>@<dmg>#<hash>" for stacks with NBT; their exact icon is indexed under it. */
+  k?: string;
 }
 
 export interface FluidRef {

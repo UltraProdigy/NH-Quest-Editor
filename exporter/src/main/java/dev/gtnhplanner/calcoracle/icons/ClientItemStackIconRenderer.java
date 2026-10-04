@@ -402,8 +402,13 @@ public final class ClientItemStackIconRenderer {
                 ClientFluidStackIconRenderer.exportQueuedIconsThen(new Runnable() {
                     @Override
                     public void run() {
-                        mc.displayGuiScreen(null);
-                        afterExport.run();
+                        QuestStackIconExporter.exportThen(new Runnable() {
+                            @Override
+                            public void run() {
+                                mc.displayGuiScreen(null);
+                                afterExport.run();
+                            }
+                        });
                     }
                 });
             }

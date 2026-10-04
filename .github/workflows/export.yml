@@ -169,6 +169,22 @@ jobs:
           chmod +x prism-bootstrap
           sudo mv prism-bootstrap /usr/local/bin/
 
+      - name: Set up Node
+        if: inputs.render_icons
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: List the item stacks the questbook shows
+        if: inputs.render_icons
+        run: |
+          # The exporter renders each of these exactly (NBT included) for the site's quest icons.
+          git clone -q --depth 1 --filter=blob:none --sparse \
+            https://github.com/GTNewHorizons/GT-New-Horizons-Modpack "$WORK/modpack"
+          git -C "$WORK/modpack" sparse-checkout set config/betterquesting
+          node site/scripts/build-quests.ts "$WORK/modpack/config/betterquesting/DefaultQuests" \
+            "$WORK/questbook.json" --stacks "$WORK/quest-stacks.jsonl"
+
       - name: Install client
         working-directory: ${{ env.WORK }}/client
         env:
@@ -203,6 +219,7 @@ jobs:
               --jvm-arg "-Dgtnh.oracle.iconCacheDir=$WORK/oracle/icon-cache"
               --jvm-arg "-Dgtnh.oracle.iconSize=$ICON_SIZE"
               --jvm-arg "-Dgtnh.oracle.neiLayoutDir=$WORK/oracle/nei-layouts"
+              --jvm-arg "-Dgtnh.oracle.questStacks=$WORK/quest-stacks.jsonl"
               --jvm-arg "-Djava.awt.headless=false"
             )
           fi
@@ -282,6 +299,7 @@ jobs:
             milestone forge_loaded 'Forge Mod Loader has successfully loaded'
             milestone export_started 'GTNH calculation oracle export started'
             milestone export_written 'GTNH calculation oracle export wrote'
+            milestone quest_icons_started 'GTNH quest stack icons started'
             milestone icons_finished 'GTNH calculation oracle icon export finished'
           fi
           start=$(awk '$1=="game_launch"{print $2}' "$out/timings.txt")
@@ -337,6 +355,8 @@ jobs:
             grep -m1 'GTNH calculation oracle export wrote' "$log" 2>/dev/null | sed 's/.*oracle export wrote/export wrote/' || true
             grep 'item icon batch started\|icon progress' "$log" 2>/dev/null | tail -n 1 | sed 's/^[0-9]* //' || true
             grep -c 'icon exporter failed' "$log" 2>/dev/null | sed 's/^/icon failure log lines: /' || true
+            grep 'quest stack icon progress' "$log" 2>/dev/null | tail -n 1 | sed 's/^[0-9]* //' || true
+            grep 'Quest stack icon failed' "$log" 2>/dev/null | head -n 15 | cut -c1-300 || true
           } > "$WORK/diag-timings.txt"
           annotate "timings" "$WORK/diag-timings.txt" 6000
           # How many icons are a single flat colour (a sign of broken texture sampling).
