@@ -4,11 +4,15 @@
 // Usage: node --max-old-space-size=8192 scripts/build-items.ts <export.json> <icons dir> <questbook.json> [out dir]
 // Optional env: DAILY_TAG (recorded as the data source).
 //
+// <icons dir>/quest/manifest.json, when present, has icons rendered from the exact stacks the quests
+// use (scripts/build-quests.ts --stacks); those replace the recipe export's icon for the same key and
+// add the stacks with NBT (keys "<id>@<dmg>#<hash>").
+//
 // Phase 1 only ships what the questbook references (quest/line icons, task and reward items,
 // their ore dictionary members). The full item index comes with the recipe views.
 
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import type { QuestbookData, ItemIndex, ItemInfo, ItemRef } from '../src/lib/model.ts';
 
 const [, , exportArg, iconsArg, questsArg, outArg] = process.argv;
@@ -75,6 +79,42 @@ console.time('walk');
 visit(exp.domains);
 console.timeEnd('walk');
 
+// ---------------------------------------------------------------- icons of the exact quest stacks
+
+interface QuestIcon {
+  name?: string | null;
+  icon?: string;
+  frames?: number;
+  ticks?: number[];
+  lit?: number;
+  t?: number;
+  glint?: number;
+}
+const questManifestFile = join(resolve(iconsArg), 'quest', 'manifest.json');
+const questIcons: Record<string, QuestIcon> = existsSync(questManifestFile)
+  ? JSON.parse(readFileSync(questManifestFile, 'utf8'))
+  : {};
+for (const [key, q] of Object.entries(questIcons)) {
+  const base = items.get(key.replace(/#.*$/, ''));
+  const info: ItemInfo & { nbt: boolean } = {
+    n: q.name || base?.n || key,
+    ...(base?.m ? { m: base.m } : {}),
+    nbt: key.includes('#'),
+  };
+  if (q.icon) {
+    info.i = q.icon;
+    if (q.frames && q.frames > 1) {
+      info.f = q.frames;
+      info.t = q.ticks;
+    }
+    if (q.lit) info.l = q.t ? 2 : 1;
+    if (q.glint) info.g = 1;
+  } else if (!key.includes('#') && base?.i) {
+    info.i = base.i; // the quest render came out empty; keep the recipe export's icon
+  }
+  items.set(key, info);
+}
+
 const oreDomain = exp.domains.find((d) => d.id === 'oreDictionary');
 const oreAll = new Map<string, string[]>();
 for (const [name, list] of Object.entries(oreDomain?.entries ?? {})) oreAll.set(name, list.map(keyOf));
@@ -100,6 +140,7 @@ for (const k of items.keys()) {
 
 function need(ref: ItemRef) {
   const key = `${ref.id}@${ref.dmg}`;
+  if (ref.k && items.has(ref.k)) needed.add(ref.k);
   if (ref.ore && oreAll.has(ref.ore)) {
     oreNeeded.add(ref.ore);
     for (const k of oreAll.get(ref.ore)!) needWithWildcard(k);
@@ -138,21 +179,27 @@ for (const id of ['minecraft:crafting_table', 'minecraft:furnace', 'minecraft:an
 // ---------------------------------------------------------------- write
 
 mkdirSync(iconOut, { recursive: true });
-for (const f of readdirSync(iconOut)) rmSync(join(iconOut, f));
+for (const f of readdirSync(iconOut)) rmSync(join(iconOut, f), { recursive: true, force: true });
 const out: Record<string, ItemInfo> = {};
 let copied = 0, noIcon = 0;
 const iconsDir = resolve(iconsArg);
 for (const key of [...needed].sort()) {
   const it = items.get(key)!;
-  const info: ItemInfo = { n: it.n };
-  if (it.m) info.m = it.m;
+  const { nbt: _nbt, ...info } = it;
   if (it.i && existsSync(join(iconsDir, it.i))) {
-    info.i = it.i;
     if (!existsSync(join(iconOut, it.i))) {
+      mkdirSync(dirname(join(iconOut, it.i)), { recursive: true });
       copyFileSync(join(iconsDir, it.i), join(iconOut, it.i));
       copied++;
     }
-  } else noIcon++;
+  } else {
+    delete info.i;
+    delete info.f;
+    delete info.t;
+    delete info.l;
+    delete info.g;
+    noIcon++;
+  }
   out[key] = info;
 }
 const ore: Record<string, string[]> = {};

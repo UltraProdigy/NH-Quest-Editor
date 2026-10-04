@@ -7,6 +7,7 @@ import { image, siteUrl, fetchJson } from './assets.ts';
 import { type Gfx } from './core.ts';
 import { animating } from './frame.ts';
 import { drawString, stringWidth } from './font.ts';
+import { drawIcon } from './itemRender.ts';
 import type { ItemRef, FluidRef, ItemIndex, ItemInfo } from '../lib/model.ts';
 import { itemKey, fluidKey } from '../lib/model.ts';
 
@@ -38,8 +39,14 @@ function lookup(key: string): ItemInfo | undefined {
   return index?.items[key];
 }
 
+/** Index key of a stack: its exact (NBT) key when that was rendered, else registry name and meta. */
+export function refKey(ref: ItemRef): string {
+  return ref.k && lookup(ref.k) ? ref.k : itemKey(ref.id, ref.dmg);
+}
+
 /** Item variants for a stack: ore dictionary members, wildcard metas, or the stack itself. */
 export function variants(ref: ItemRef): string[] {
+  if (ref.k && lookup(ref.k)) return [ref.k];
   if (ref.ore) {
     const list = ore[ref.ore];
     if (list?.length) return list;
@@ -61,7 +68,7 @@ export function currentVariant(ref: ItemRef, interval = 1): string {
 }
 
 export function itemName(ref: ItemRef | string): string {
-  const key = typeof ref === 'string' ? ref : itemKey(ref.id, ref.dmg);
+  const key = typeof ref === 'string' ? ref : refKey(ref);
   const info = lookup(key);
   if (info) return info.n;
   if (typeof ref !== 'string' && ref.dmg === WILDCARD) {
@@ -69,7 +76,8 @@ export function itemName(ref: ItemRef | string): string {
     const first = v.length ? lookup(v[0]) : undefined;
     if (first) return first.n;
   }
-  return typeof ref === 'string' ? key : key.endsWith('@0') ? ref.id : key;
+  const shown = key.replace(/#.*$/, '');
+  return typeof ref === 'string' ? shown : shown.endsWith('@0') ? ref.id : shown;
 }
 
 export function fluidName(f: FluidRef): string {
@@ -79,10 +87,10 @@ export function fluidName(f: FluidRef): string {
 const modName = (modId?: string) => (modId ? (mods[modId] ?? modId) : undefined);
 
 export function itemTooltip(ref: ItemRef | string, advanced = false): string[] {
-  const key = typeof ref === 'string' ? ref : itemKey(ref.id, ref.dmg);
+  const key = typeof ref === 'string' ? ref : refKey(ref);
   const info = lookup(key);
   const lines = [info?.n ?? itemName(ref)];
-  if (advanced || !info) lines.push(`§8${key.replace('@', ' @ ')}`);
+  if (advanced || !info) lines.push(`§8${key.replace(/#.*$/, '').replace('@', ' @ ')}`);
   const mod = modName(info?.m ?? key.split(':')[0]);
   if (mod) lines.push(`§9§o${mod}`);
   return lines;
@@ -95,10 +103,11 @@ export function fluidTooltip(f: FluidRef): string[] {
 
 // ---------------------------------------------------------------- drawing
 
-function iconImage(key: string): HTMLImageElement | null {
+/** Index entry whose icon to draw: the exact stack's, or its plain item's when it has none. */
+function iconInfo(key: string): ItemInfo | undefined {
   const info = lookup(key);
-  if (!info?.i) return null;
-  return image(siteUrl(iconDir + info.i));
+  if (info?.i || !key.includes('#')) return info;
+  return lookup(key.replace(/#.*$/, ''));
 }
 
 function drawPlaceholder(gfx: Gfx, x: number, y: number, size: number) {
@@ -116,10 +125,11 @@ function drawPlaceholder(gfx: Gfx, x: number, y: number, size: number) {
  * size; text is the stack-size label (drawn bottom-right, shrunk if wider than the slot).
  */
 export function drawItemKey(gfx: Gfx, key: string, x: number, y: number, size = 16, text = '') {
-  const img = iconImage(key);
+  const info = iconInfo(key);
+  const img = info?.i ? image(siteUrl(iconDir + info.i)) : null;
   // Exported icons are a 32-unit canvas with the 16-unit item in the middle (room for renders
   // that spill out of their slot), so the slot is the centre half of the image.
-  if (img) gfx.icon(img, x - size / 2, y - size / 2, size * 2, size * 2);
+  if (img && info) drawIcon(gfx, img, info, x, y, size);
   else drawPlaceholder(gfx, x, y, size);
   if (text) {
     gfx.push();

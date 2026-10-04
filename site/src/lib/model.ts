@@ -78,6 +78,19 @@ export interface ItemInfo {
   i?: string;
   /** Mod id. */
   m?: string;
+  /**
+   * Icons rendered from the exact quest stack are vertical strips of square layers: the animation
+   * frames, then (when lit) the light layer and the optional texture layer. See
+   * exporter/.../QuestStackIconExporter.java.
+   */
+  /** Number of animation frames (absent: 1). */
+  f?: number;
+  /** Length of each frame in game ticks. */
+  t?: number[];
+  /** Lit by the GUI item lights: 1 = frames are unlit colours plus a light layer, 2 = plus a texture layer. */
+  l?: 1 | 2;
+  /** Draw the enchantment glint over it. */
+  g?: 1;
 }
 
 export interface ItemIndex {

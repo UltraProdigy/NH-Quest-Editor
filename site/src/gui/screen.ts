@@ -429,7 +429,7 @@ export class Host {
     g.imageSmoothingEnabled = false;
     gfx.now = performance.now();
     gfx.ox = gfx.oy = 0;
-    gfx.s = this.scale;
+    gfx.s = gfx.base = this.scale;
     // drawDefaultBackground over a world: a dark translucent gradient. There is no world here,
     // so it sits on a plain dark backdrop.
     g.fillStyle = '#1b1b1f';

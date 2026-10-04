@@ -15,6 +15,8 @@ export class Gfx {
   ox = 0;
   oy = 0;
   s = 1;
+  /** Device pixels per GUI unit at the root, i.e. the GUI scale. s / base is the GL modelview scale. */
+  base = 1;
   /** Milliseconds, fixed for the frame so every animation reads the same clock. */
   now = 0;
   private stack: [number, number, number][] = [];
@@ -74,19 +76,24 @@ export class Gfx {
   }
 
   /**
-   * Draw a whole image (an exported item icon) into a GUI-space rectangle, snapped to device
+   * Draw part of an image (an exported item icon) into a GUI-space rectangle, snapped to device
    * pixels and always sampled nearest-neighbour. The game draws items as geometry with
    * GL_NEAREST textures, which picks one texel per screen pixel at any scale; point-sampling a
    * high-resolution render at each screen pixel gives the same picture. Filtering here would
    * blur, and enlarging a low-resolution render would make 3D blocks blocky.
    */
-  icon(img: CanvasImageSource, x: number, y: number, w: number, h: number, alpha = 1) {
+  icon(
+    img: CanvasImageSource,
+    sx: number, sy: number, sw: number, sh: number,
+    x: number, y: number, w: number, h: number,
+    alpha = 1,
+  ) {
     const x0 = this.dx(x), y0 = this.dy(y), x1 = this.dx(x + w), y1 = this.dy(y + h);
     if (x1 <= x0 || y1 <= y0) return;
     const g = this.g;
     const prevA = g.globalAlpha;
     g.globalAlpha = prevA * alpha;
-    g.drawImage(img, x0, y0, x1 - x0, y1 - y0);
+    g.drawImage(img, sx, sy, sw, sh, x0, y0, x1 - x0, y1 - y0);
     g.globalAlpha = prevA;
   }
 

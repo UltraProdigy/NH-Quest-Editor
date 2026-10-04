@@ -1,5 +1,5 @@
 // Downloads the Minecraft 1.7.10 client jar from Mojang and extracts the few vanilla assets the
-// site draws with (the bitmap font). They are not stored in this repository.
+// site draws with (the bitmap font and the enchantment glint). They are not stored in this repository.
 //
 // Usage: node scripts/fetch-vanilla.ts [out dir]   (default: public/assets/minecraft)
 // Needs `unzip` on the PATH.
@@ -36,7 +36,11 @@ const tmp = mkdtempSync(join(tmpdir(), 'mc-'));
 const jarPath = join(tmp, 'client.jar');
 writeFileSync(jarPath, jar);
 mkdirSync(out, { recursive: true });
-execFileSync('unzip', ['-o', '-q', jarPath, 'assets/minecraft/textures/font/*', 'assets/minecraft/font/*', '-d', tmp]);
+execFileSync('unzip', [
+  '-o', '-q', jarPath,
+  'assets/minecraft/textures/font/*', 'assets/minecraft/font/*', 'assets/minecraft/textures/misc/enchanted_item_glint.png',
+  '-d', tmp,
+]);
 execFileSync('cp', ['-r', join(tmp, 'assets/minecraft/textures'), join(tmp, 'assets/minecraft/font'), out]);
 rmSync(tmp, { recursive: true, force: true });
-console.log(`vanilla font assets from Minecraft ${VERSION} -> ${out}`);
+console.log(`vanilla font and glint assets from Minecraft ${VERSION} -> ${out}`);
