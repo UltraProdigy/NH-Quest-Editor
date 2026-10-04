@@ -1,0 +1,1740 @@
+{
+ "textures": {
+  "betterquesting:panel_main": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    0,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:panel_dark": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    12,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:panel_inner": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    24,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:item_frame": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    36,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:aux_frame_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    48,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:aux_frame_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    60,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_normal_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    72,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_normal_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    84,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_normal_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    96,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_clean_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    108,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    2
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_clean_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    120,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    2
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_clean_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    132,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    2
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_alt_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    144,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    2
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_alt_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    156,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    2
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:btn_alt_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    178,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    2,
+    2,
+    2,
+    2
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:hotbar_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    190,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    3,
+    3,
+    2,
+    2
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:hotbar_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    202,
+    0,
+    12,
+    12
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:scroll_v_bg": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    0,
+    12,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:scroll_v_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    8,
+    12,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:scroll_v_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    16,
+    12,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:scroll_v_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    24,
+    12,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:scroll_h_bg": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    0,
+    20,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:scroll_h_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    8,
+    20,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:scroll_h_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    16,
+    20,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:scroll_h_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    24,
+    20,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:meter_h_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    48,
+    12,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:meter_h_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    56,
+    12,
+    8,
+    8
+   ],
+   "padding": [
+    3,
+    3,
+    3,
+    3
+   ],
+   "sliceMode": 1
+  },
+  "betterquesting:quest_norm_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    0,
+    0,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_norm_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    0,
+    24,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_norm_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    0,
+    48,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_norm_3": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    0,
+    72,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_norm_4": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    0,
+    72,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_main_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    24,
+    0,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 0
+  },
+  "betterquesting:quest_main_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    24,
+    24,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 0
+  },
+  "betterquesting:quest_main_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    24,
+    48,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 0
+  },
+  "betterquesting:quest_main_3": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    24,
+    72,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 0
+  },
+  "betterquesting:quest_main_4": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    24,
+    72,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 0
+  },
+  "betterquesting:quest_aux_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    48,
+    0,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_aux_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    48,
+    24,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_aux_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    48,
+    48,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_aux_3": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    48,
+    72,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:quest_aux_4": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/quest_frames.png",
+   "bounds": [
+    48,
+    72,
+    24,
+    24
+   ],
+   "padding": [
+    8,
+    8,
+    8,
+    8
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:text_box_0": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    0,
+    28,
+    8,
+    8
+   ],
+   "padding": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:text_box_1": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    8,
+    28,
+    8,
+    8
+   ],
+   "padding": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:text_box_2": {
+   "textureType": "betterquesting:texture_sliced",
+   "atlas": "betterquesting:textures/gui/simple_frames.png",
+   "bounds": [
+    16,
+    28,
+    8,
+    8
+   ],
+   "padding": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "sliceMode": 2
+  },
+  "betterquesting:icon_tick": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    128,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_cross": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    160,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_positive": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    32,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_negative": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    112,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_left": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    208,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_right": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    224,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_up": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    176,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_down": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    192,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_props": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    0,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_gear": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    0,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_trash": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    16,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_selection": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_copy": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    32,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_grab": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    48,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_new": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    48,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_grid": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    64,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_two_way": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    64,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_link": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    80,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_sort": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    80,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_view": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    96,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_func": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    96,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_cursor": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    112,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_refresh": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    128,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_item": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    144,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_scale": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    144,
+    16,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_paint": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    48,
+    48,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_exit": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    160,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_notice": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    176,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_party": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    192,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_theme": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    208,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_home": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    224,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_info": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    64,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_desc": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    208,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_books": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    224,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_image": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    240,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_play": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    0,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_pause": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    32,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_stop": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    16,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_back": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    48,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_skip": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    64,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_fastforward": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    32,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_rewind": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    48,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_vol_up": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    80,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_vol_down": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    96,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_vol_mute": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    112,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_av_sound": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    128,
+    32,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_file": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    0,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_folder_open": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    16,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_folder_closed": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    32,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_dir_up": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    48,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_pg_prev": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    224,
+    48,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_pg_next": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    240,
+    48,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_save": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    0,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_visibility_normal": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    192,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_visibility_implicit": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    208,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_visibility_hidden": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    224,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_locked": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    80,
+    48,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_unlocked": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    96,
+    48,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_view_mode_off": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    240,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_view_mode_on": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    96,
+    0,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_quest_lines_shown": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    0,
+    96,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_box_fit": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    80,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_zoom": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    96,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_zoom_in": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    112,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_zoom_out": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    128,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_chest_all": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    144,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_chest": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    160,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_bookmark": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    176,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_menu": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    192,
+    64,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_quest": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    80,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_patreon": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    144,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  },
+  "betterquesting:icon_twitch": {
+   "textureType": "betterquesting:texture_simple",
+   "atlas": "betterquesting:textures/gui/editor_icons.png",
+   "bounds": [
+    160,
+    80,
+    16,
+    16
+   ],
+   "stretch": false
+  }
+ },
+ "colors": {
+  "betterquesting:text_header": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF000000"
+  },
+  "betterquesting:text_main": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF000000"
+  },
+  "betterquesting:text_aux_0": {
+   "colorType": "betterquesting:color_static",
+   "color": "FFFFFFFF"
+  },
+  "betterquesting:text_aux_1": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF000000"
+  },
+  "betterquesting:text_highlight": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF0000FF"
+  },
+  "betterquesting:text_watermark": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF808080"
+  },
+  "betterquesting:item_highlight": {
+   "colorType": "betterquesting:color_static",
+   "color": "80FFFFFF"
+  },
+  "betterquesting:gui_divider": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF000000"
+  },
+  "betterquesting:update_notice": {
+   "colorType": "betterquesting:color_pulse",
+   "period": 1.0,
+   "phase": 0.0,
+   "color1": {
+    "colorType": "betterquesting:color_static",
+    "color": "FFFFFF00"
+   },
+   "color2": {
+    "colorType": "betterquesting:color_static",
+    "color": "FF808000"
+   }
+  },
+  "betterquesting:grid_major": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF000000"
+  },
+  "betterquesting:grid_minor": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF000000"
+  },
+  "betterquesting:btn_disabled": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF808080"
+  },
+  "betterquesting:btn_idle": {
+   "colorType": "betterquesting:color_static",
+   "color": "FFFFFFFF"
+  },
+  "betterquesting:btn_hover": {
+   "colorType": "betterquesting:color_static",
+   "color": "FFFFFFA0"
+  },
+  "betterquesting:quest_line_locked": {
+   "colorType": "betterquesting:color_static",
+   "color": "FFC00000"
+  },
+  "betterquesting:quest_line_unlocked": {
+   "colorType": "betterquesting:color_pulse",
+   "period": 1.0,
+   "phase": 0.0,
+   "color1": {
+    "colorType": "betterquesting:color_static",
+    "color": "FFFFFF00"
+   },
+   "color2": {
+    "colorType": "betterquesting:color_static",
+    "color": "FF808000"
+   }
+  },
+  "betterquesting:quest_line_pending": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF00FF00"
+  },
+  "betterquesting:quest_line_complete": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF00FF00"
+  },
+  "betterquesting:quest_line_repeatable": {
+   "colorType": "betterquesting:color_static",
+   "color": "FFFF4500"
+  },
+  "betterquesting:quest_line_implicit_mixin": {
+   "colorType": "betterquesting:color_static",
+   "color": "00000000"
+  },
+  "betterquesting:quest_icon_locked": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF808080"
+  },
+  "betterquesting:quest_icon_unlocked": {
+   "colorType": "betterquesting:color_pulse",
+   "period": 1.0,
+   "phase": 0.0,
+   "color1": {
+    "colorType": "betterquesting:color_static",
+    "color": "FFC00000"
+   },
+   "color2": {
+    "colorType": "betterquesting:color_static",
+    "color": "FF600000"
+   }
+  },
+  "betterquesting:quest_icon_pending": {
+   "colorType": "betterquesting:color_pulse",
+   "period": 1.0,
+   "phase": 0.0,
+   "color1": {
+    "colorType": "betterquesting:color_static",
+    "color": "FF00FFFF"
+   },
+   "color2": {
+    "colorType": "betterquesting:color_static",
+    "color": "FF008080"
+   }
+  },
+  "betterquesting:quest_icon_complete": {
+   "colorType": "betterquesting:color_static",
+   "color": "FF00FF00"
+  },
+  "betterquesting:quest_icon_repeatable": {
+   "colorType": "betterquesting:color_pulse",
+   "period": 1.0,
+   "phase": 0.0,
+   "color1": {
+    "colorType": "betterquesting:color_static",
+    "color": "FFFF4500"
+   },
+   "color2": {
+    "colorType": "betterquesting:color_static",
+    "color": "FFFF6000"
+   }
+  }
+ },
+ "lines": {
+  "betterquesting:gui_divider": {
+   "lineType": "betterquesting:line_simple",
+   "stippleScale": 1,
+   "stippleMask": "1111111111111111"
+  },
+  "betterquesting:grid_major": {
+   "lineType": "betterquesting:line_simple",
+   "stippleScale": 1,
+   "stippleMask": "1111111111111111"
+  },
+  "betterquesting:grid_minor": {
+   "lineType": "betterquesting:line_simple",
+   "stippleScale": 2,
+   "stippleMask": "1010101010101010"
+  },
+  "betterquesting:quest_locked": {
+   "lineType": "betterquesting:line_directional"
+  },
+  "betterquesting:quest_unlocked": {
+   "lineType": "betterquesting:line_directional"
+  },
+  "betterquesting:quest_pending": {
+   "lineType": "betterquesting:line_directional"
+  },
+  "betterquesting:quest_complete": {
+   "lineType": "betterquesting:line_directional"
+  },
+  "betterquesting:quest_repeatable": {
+   "lineType": "betterquesting:line_directional"
+  }
+ }
+}
