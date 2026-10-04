@@ -313,7 +313,9 @@ export class QuestLinesScreen extends Screen {
   private buildChapterList() {
     this.cvLines.reset();
     this.lineButtons = [];
-    const listW = this.cvLines.transform.w();
+    // Lay out at the open width: when the tray was just opened it is still animating from closed
+    // (cvLines has 8+16 padding).
+    const listW = this.cvChapterTray.openWidth - 24;
     const panels: Panel[] = [];
     let row = 0;
     for (const l of this.visibleLines()) {
