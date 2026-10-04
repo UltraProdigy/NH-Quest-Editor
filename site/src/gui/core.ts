@@ -73,15 +73,24 @@ export class Gfx {
     drawTinted(this.g, img, sx, sy, sw, sh, x0, y0, x1 - x0, y1 - y0, argb);
   }
 
-  /** Same as image() but without snapping, for smooth (non pixel-art) content like item icons. */
-  imageSmooth(img: CanvasImageSource, x: number, y: number, w: number, h: number, alpha = 1) {
+  /**
+   * Draw a whole image (an exported item icon) into a GUI-space rectangle, snapped to device
+   * pixels. Enlarging uses nearest-neighbour like Minecraft's GL_NEAREST item textures, so texels
+   * stay sharp; only shrinking (quest map zoomed out, GUI scale 1) is filtered.
+   */
+  icon(img: CanvasImageSource & { width: number }, x: number, y: number, w: number, h: number, alpha = 1) {
+    const x0 = this.dx(x), y0 = this.dy(y), x1 = this.dx(x + w), y1 = this.dy(y + h);
+    if (x1 <= x0 || y1 <= y0) return;
     const g = this.g;
     const prevA = g.globalAlpha;
     g.globalAlpha = prevA * alpha;
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(img, this.ox + x * this.s, this.oy + y * this.s, w * this.s, h * this.s);
-    g.imageSmoothingEnabled = false;
+    const shrink = x1 - x0 < img.width;
+    if (shrink) {
+      g.imageSmoothingEnabled = true;
+      g.imageSmoothingQuality = 'high';
+    }
+    g.drawImage(img, x0, y0, x1 - x0, y1 - y0);
+    if (shrink) g.imageSmoothingEnabled = false;
     g.globalAlpha = prevA;
   }
 
