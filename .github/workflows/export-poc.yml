@@ -57,6 +57,9 @@ jobs:
     steps:
       - name: Record start time
         run: |
+          # upload-artifact rejects paths containing "..", so resolve WORK once for all later steps.
+          WORK=$(realpath -m "$WORK")
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
           mkdir -p "$WORK/out"
           echo "job_start $(date +%s)" > "$WORK/out/timings.txt"
 
