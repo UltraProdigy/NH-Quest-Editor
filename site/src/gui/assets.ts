@@ -1,8 +1,10 @@
 // Loading of textures and other static assets.
 //
 // Minecraft resource locations ("domain:path") map to assets/<domain>/<path> under the site root.
-// Images are fetched lazily; drawing code asks for an image every frame and simply skips it until
-// it has loaded (the render loop redraws continuously, so it appears a frame later).
+// Images are fetched lazily; drawing code asks for an image while drawing and simply skips it until
+// it has loaded (loading asks for a redraw, so it appears a frame later).
+
+import { invalidate } from './frame.ts';
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -25,7 +27,10 @@ export function image(url: string): HTMLImageElement | null {
     const img = new Image();
     e = { img, ok: false, failed: false };
     const entry = e;
-    img.onload = () => (entry.ok = true);
+    img.onload = () => {
+      entry.ok = true;
+      invalidate();
+    };
     img.onerror = () => (entry.failed = true);
     img.src = url;
     images.set(url, e);

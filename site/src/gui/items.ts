@@ -5,6 +5,7 @@
 
 import { image, siteUrl, fetchJson } from './assets.ts';
 import { type Gfx } from './core.ts';
+import { animating } from './frame.ts';
 import { drawString, stringWidth } from './font.ts';
 import type { ItemRef, FluidRef, ItemIndex, ItemInfo } from '../lib/model.ts';
 import { itemKey, fluidKey } from '../lib/model.ts';
@@ -55,6 +56,7 @@ export function variants(ref: ItemRef): string[] {
 export function currentVariant(ref: ItemRef, interval = 1): string {
   const v = variants(ref);
   if (v.length === 1) return v[0];
+  animating();
   return v[Math.floor(((performance.now() / 1000) % (v.length * interval)) / interval)];
 }
 

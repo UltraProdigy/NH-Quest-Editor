@@ -7,6 +7,7 @@
 // nine-slice textures seamless at any zoom, like GL does.
 
 import { drawTinted } from './assets.ts';
+import { animating } from './frame.ts';
 
 export class Gfx {
   g: CanvasRenderingContext2D;
@@ -254,7 +255,9 @@ export class RectLerp implements GuiRect {
   }
   private blend() {
     if (this.dur <= 0) return 1;
-    return Math.min(1, (performance.now() - this.t0) / this.dur);
+    const b = Math.min(1, (performance.now() - this.t0) / this.dur);
+    if (b < 1) animating();
+    return b;
   }
   private idle() {
     return this.blend() >= 1;

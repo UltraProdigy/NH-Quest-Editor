@@ -6,6 +6,7 @@
 import { texture as loadTexture } from './assets.ts';
 import { type GuiColor, staticColor, pulseColor, sequenceColor, parseColorValue, WHITE } from './color.ts';
 import { type Gfx, type GuiRect } from './core.ts';
+import { animating } from './frame.ts';
 import presets from './bq-presets.json';
 
 // ---------------------------------------------------------------- textures
@@ -165,6 +166,7 @@ export class SlideShowTexture implements GuiTexture {
   constructor(public interval: number, public slides: GuiTexture[]) {}
   current(now = performance.now()): GuiTexture | null {
     if (!this.slides.length) return null;
+    if (this.slides.length > 1) animating();
     return this.slides[Math.floor(((now / 1000) % (this.slides.length * this.interval)) / this.interval)];
   }
   draw(gfx: Gfx, x: number, y: number, w: number, h: number, color?: GuiColor) {
@@ -238,6 +240,7 @@ export class DirectionalLine implements GuiLine {
       for (let i = 0; i <= n; i++) {
         let p = i / (n + 1) + off;
         if (animate) {
+          animating();
           const period = len * 50;
           p = (p + (performance.now() % period) / period) % 1;
         }

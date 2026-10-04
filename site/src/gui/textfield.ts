@@ -2,6 +2,7 @@
 // browser text entry (IME, mobile keyboards, paste) works; the field draws its value itself.
 
 import { BasePanel, contains, type Gfx, type GuiRect } from './core.ts';
+import { animating, invalidate } from './frame.ts';
 import { tex, col } from './theme.ts';
 import { drawString, stringWidth } from './font.ts';
 
@@ -18,7 +19,10 @@ function hiddenInput(): HTMLInputElement {
   Object.assign(input.style, {
     position: 'fixed', left: '0', top: '0', width: '1px', height: '1px', opacity: '0', border: '0', padding: '0',
   });
-  input.addEventListener('input', () => owner?.fromInput());
+  input.addEventListener('input', () => {
+    owner?.fromInput();
+    invalidate();
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') input!.blur();
     e.stopPropagation();
@@ -79,6 +83,7 @@ export class PanelTextField extends BasePanel {
       const off = Math.max(0, w - (r.w() - 10));
       drawString(gfx, this.text, r.x() + 4 - off, r.y() + 4, col('text_aux_0').argb(), false);
     }
+    if (this.focused) animating();
     if (this.focused && Math.floor(performance.now() / 500) % 2 === 0) {
       const w = stringWidth(this.text);
       const off = Math.max(0, w - (r.w() - 10));

@@ -1,9 +1,13 @@
 // Screens (GuiScreenCanvas) and the host that runs them on a <canvas>: GUI scale, input,
-// tooltips and the redraw loop.
+// tooltips and redraw scheduling.
 
 import { CanvasEmpty, Gfx, Rect, Transform, Align, mouseButtons, keys, type Tooltip, type Panel } from './core.ts';
 import { drawString, stringWidth, FONT_HEIGHT } from './font.ts';
 import { splitString } from './text.ts';
+import { redraw } from './frame.ts';
+
+/** Frame interval while only animations change the picture (input still redraws at once). */
+const ANIMATION_FRAME_MS = 1000 / 30;
 
 export abstract class Screen {
   root!: CanvasEmpty;
@@ -185,6 +189,9 @@ export class Host {
   private h = 0;
   private dirty = true;
   private lastSize = '';
+  private frameQueued = false;
+  private animTimer = 0;
+  private lastFrame = 0;
 
   private deviceSize() {
     const dpr = window.devicePixelRatio || 1;
@@ -196,16 +203,43 @@ export class Host {
     const g = canvas.getContext('2d', { alpha: false })!;
     this.gfx = new Gfx(g);
     this.bind();
-    new ResizeObserver(() => {
+    const resized = () => {
       // Only a real size change rebuilds the screen (Minecraft re-inits GUIs on resize).
       if (this.deviceSize() !== this.lastSize) this.dirty = true;
-    }).observe(canvas);
-    const loop = () => {
-      this.frame();
-      requestAnimationFrame(loop);
+      this.invalidate();
     };
-    requestAnimationFrame(loop);
+    new ResizeObserver(resized).observe(canvas);
+    // Browser zoom changes devicePixelRatio, which the observer does not always report.
+    window.addEventListener('resize', resized);
+    redraw.request = () => this.invalidate();
+    this.invalidate();
   }
+
+  /** Draw a frame at the next display refresh. */
+  invalidate() {
+    if (this.frameQueued) return;
+    this.frameQueued = true;
+    requestAnimationFrame(this.tick);
+  }
+
+  private tick = () => {
+    this.frameQueued = false;
+    if (this.animTimer) {
+      clearTimeout(this.animTimer);
+      this.animTimer = 0;
+    }
+    redraw.animating = false;
+    this.frame();
+    this.lastFrame = performance.now();
+    // Something on screen moves on its own: draw again, but no faster than the animation rate.
+    if (redraw.animating) {
+      const wait = Math.max(0, ANIMATION_FRAME_MS - (performance.now() - this.lastFrame));
+      this.animTimer = window.setTimeout(() => {
+        this.animTimer = 0;
+        this.invalidate();
+      }, wait);
+    }
+  };
 
   /** Open a screen. Pass push=false when restoring a screen (no new history entry). */
   show(s: Screen, push = true) {
@@ -214,6 +248,7 @@ export class Host {
     const same = s === this.screen;
     this.screen = s;
     this.relayout();
+    this.invalidate();
     this.opts.onNavigate?.(s, push && !same);
   }
 
@@ -223,6 +258,7 @@ export class Host {
     p.host = this;
     this.screen = p;
     this.relayout();
+    this.invalidate();
     p.resumed();
     this.opts.onNavigate?.(p, false);
   }
@@ -233,16 +269,19 @@ export class Host {
   /** Rebuild the current screen (after a setting that changes its contents). */
   refresh() {
     this.dirty = true;
+    this.invalidate();
   }
 
   /** Report the current screen's route/title again (after it changed its own state). */
   notify(s: Screen) {
     if (s === this.screen) this.opts.onNavigate?.(s, false);
+    this.invalidate();
   }
 
   setScale(v: number) {
     this.scaleSetting = v;
     this.dirty = true;
+    this.invalidate();
   }
 
   maxScale() {
@@ -289,8 +328,14 @@ export class Host {
   private bind() {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => e.preventDefault());
-    c.addEventListener('mousemove', (e) => ([this.mx, this.my] = this.toGui(e)));
-    c.addEventListener('mouseleave', () => (this.mx = this.my = -1));
+    c.addEventListener('mousemove', (e) => {
+      [this.mx, this.my] = this.toGui(e);
+      this.invalidate();
+    });
+    c.addEventListener('mouseleave', () => {
+      this.mx = this.my = -1;
+      this.invalidate();
+    });
     c.addEventListener('mousedown', (e) => {
       e.preventDefault();
       [this.mx, this.my] = this.toGui(e);
@@ -298,12 +343,14 @@ export class Host {
       const b = e.button === 2 ? 1 : e.button === 1 ? 2 : 0;
       mouseButtons[b] = true;
       this.screen?.mouseDown(this.mx, this.my, b);
+      this.invalidate();
     });
     window.addEventListener('mouseup', (e) => {
       const b = e.button === 2 ? 1 : e.button === 1 ? 2 : 0;
       mouseButtons[b] = false;
       [this.mx, this.my] = this.toGui(e);
       this.screen?.mouseUp(this.mx, this.my, b);
+      this.invalidate();
     });
     c.addEventListener(
       'wheel',
@@ -312,18 +359,24 @@ export class Host {
         [this.mx, this.my] = this.toGui(e);
         const d = Math.sign(e.deltaY);
         if (d) this.screen?.scroll(this.mx, this.my, d);
+        this.invalidate();
       },
       { passive: false },
     );
     window.addEventListener('keydown', (e) => {
       keys.shift = e.shiftKey;
+      this.invalidate();
       if ((e.target as HTMLElement)?.closest?.('input,textarea,select')) return;
       if (this.screen?.key(e)) e.preventDefault();
     });
-    window.addEventListener('keyup', (e) => (keys.shift = e.shiftKey));
+    window.addEventListener('keyup', (e) => {
+      keys.shift = e.shiftKey;
+      this.invalidate();
+    });
     window.addEventListener('blur', () => {
       mouseButtons.fill(false);
       keys.shift = false;
+      this.invalidate();
     });
 
     // Touch: one finger behaves like the left mouse button.
@@ -335,6 +388,7 @@ export class Host {
         [this.mx, this.my] = this.toGui(e.touches[0] as unknown as MouseEvent);
         mouseButtons[0] = true;
         this.screen?.mouseDown(this.mx, this.my, 0);
+        this.invalidate();
       },
       { passive: false },
     );
@@ -344,6 +398,7 @@ export class Host {
         if (e.touches.length !== 1) return;
         e.preventDefault();
         [this.mx, this.my] = this.toGui(e.touches[0] as unknown as MouseEvent);
+        this.invalidate();
       },
       { passive: false },
     );
@@ -351,6 +406,7 @@ export class Host {
       mouseButtons[0] = false;
       this.screen?.mouseUp(this.mx, this.my, 0);
       this.mx = this.my = -1;
+      this.invalidate();
     });
   }
 

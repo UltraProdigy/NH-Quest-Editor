@@ -5,6 +5,7 @@ import {
   contains, mouseButtons,
 } from './core.ts';
 import { type GuiColor, WHITE } from './color.ts';
+import { animating } from './frame.ts';
 import { type GuiTexture, type GuiLine, tex, col, ColorTexture, LayeredTexture } from './theme.ts';
 import { drawString, stringWidth, FONT_HEIGHT } from './font.ts';
 import { splitString, processTags, type LinkRange } from './text.ts';
@@ -37,6 +38,7 @@ export class FloatIO implements ValueIO {
   read() {
     if (this.lerp && this.s !== this.v) {
       if (Math.abs(this.s - this.v) < 0.001) return (this.s = this.v);
+      animating();
       const now = performance.now();
       const d = now - this.t;
       this.s = this.s + (this.v - this.s) * Math.min(1, Math.max(0, d * this.speed));

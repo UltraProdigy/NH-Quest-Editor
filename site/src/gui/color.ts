@@ -1,5 +1,7 @@
 // Colours as BetterQuesting models them (IGuiColor): ARGB integers, optionally animated.
 
+import { animating } from './frame.ts';
+
 export interface GuiColor {
   /** Current ARGB value (unsigned). */
   argb(): number;
@@ -19,13 +21,20 @@ export function lerpRGB(c1: number, c2: number, blend: number): number {
   return ((mix(24) << 24) | (mix(16) << 16) | (mix(8) << 8) | mix(0)) >>> 0;
 }
 
+/**
+ * Steps a pulse blend is rounded to. Tinted textures are cached per colour, so a continuous blend
+ * would make a new tinted copy of every texture on every frame; 32 steps look the same.
+ */
+const PULSE_STEPS = 32;
+
 /** GuiColorPulse: cosine blend between two colours. period in seconds, phase 0..1. */
 export const pulseColor = (c1: GuiColor, c2: GuiColor, period: number, phase: number): GuiColor => ({
   argb() {
+    animating();
     const pms = 1000 * period;
     let time = performance.now() % pms;
     time = ((time + pms * phase) % pms) / pms;
-    const blend = Math.cos(time * Math.PI * 2) / 2 + 0.5;
+    const blend = Math.round((Math.cos(time * Math.PI * 2) / 2 + 0.5) * PULSE_STEPS) / PULSE_STEPS;
     return lerpRGB(c1.argb(), c2.argb(), blend);
   },
 });
@@ -34,6 +43,7 @@ export const pulseColor = (c1: GuiColor, c2: GuiColor, period: number, phase: nu
 export const sequenceColor = (interval: number, colors: GuiColor[]): GuiColor => ({
   argb() {
     if (colors.length === 0) return 0xffffffff;
+    if (colors.length > 1) animating();
     const i = Math.floor((performance.now() / 1000 / interval) % colors.length);
     return colors[i].argb();
   },

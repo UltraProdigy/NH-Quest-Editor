@@ -8,6 +8,7 @@
 
 import { resourceUrl, loadImage, tinted, image } from './assets.ts';
 import type { Gfx } from './core.ts';
+import { animating } from './frame.ts';
 
 export const FONT_HEIGHT = 9;
 export const SECTION = '§';
@@ -415,6 +416,7 @@ export function drawString(gfx: Gfx, text: string, x: number, y: number, color: 
       curX += adv;
       continue;
     }
+    if (random || wave) animating();
     if (random) {
       const idx = asciiIndex.get(code);
       if (idx !== undefined) {
