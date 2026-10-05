@@ -392,12 +392,32 @@ export class Host {
       this.invalidate();
     });
 
-    // Touch: one finger behaves like the left mouse button.
+    // Touch: one finger behaves like the left mouse button. Two fingers pinch to zoom: each
+    // 1.25x change in their distance is one mouse wheel step (CanvasScrolling's zoom speed) at the
+    // point between them. A second finger cancels a one-finger press without clicking.
+    let pinchDist = 0;
+    const pinchPoint = (e: TouchEvent): [number, number, number] => {
+      const a = e.touches[0], b = e.touches[1];
+      const mid = { clientX: (a.clientX + b.clientX) / 2, clientY: (a.clientY + b.clientY) / 2 } as MouseEvent;
+      const [x, y] = this.toGui(mid);
+      return [x, y, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)];
+    };
     c.addEventListener(
       'touchstart',
       (e) => {
-        if (e.touches.length !== 1) return;
         e.preventDefault();
+        if (e.touches.length === 2 && !pinchDist) {
+          if (mouseButtons[0]) {
+            mouseButtons[0] = false;
+            this.screen?.mouseUp(-1e6, -1e6, 0);
+          }
+          let d;
+          [this.mx, this.my, d] = pinchPoint(e);
+          pinchDist = Math.max(1, d);
+          this.invalidate();
+          return;
+        }
+        if (e.touches.length !== 1 || pinchDist) return;
         [this.mx, this.my] = this.toGui(e.touches[0] as unknown as MouseEvent);
         mouseButtons[0] = true;
         this.screen?.mouseDown(this.mx, this.my, 0);
@@ -408,19 +428,46 @@ export class Host {
     c.addEventListener(
       'touchmove',
       (e) => {
-        if (e.touches.length !== 1) return;
         e.preventDefault();
+        if (pinchDist) {
+          if (e.touches.length < 2) return;
+          let d;
+          [this.mx, this.my, d] = pinchPoint(e);
+          const step = 1.25;
+          while (d >= pinchDist * step) {
+            this.screen?.scroll(this.mx, this.my, -1);
+            pinchDist *= step;
+          }
+          while (d <= pinchDist / step) {
+            this.screen?.scroll(this.mx, this.my, 1);
+            pinchDist /= step;
+          }
+          this.invalidate();
+          return;
+        }
+        if (e.touches.length !== 1) return;
         [this.mx, this.my] = this.toGui(e.touches[0] as unknown as MouseEvent);
         this.invalidate();
       },
       { passive: false },
     );
-    c.addEventListener('touchend', () => {
+    const touchEnd = (e: TouchEvent) => {
+      if (pinchDist) {
+        // Stay in the pinch until every finger is up, so the last one does not start a drag.
+        if (e.touches.length === 0) {
+          pinchDist = 0;
+          this.mx = this.my = -1;
+          this.invalidate();
+        }
+        return;
+      }
       mouseButtons[0] = false;
       this.screen?.mouseUp(this.mx, this.my, 0);
       this.mx = this.my = -1;
       this.invalidate();
-    });
+    };
+    c.addEventListener('touchend', touchEnd);
+    c.addEventListener('touchcancel', touchEnd);
   }
 
   private frame() {
