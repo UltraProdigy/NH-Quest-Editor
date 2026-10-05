@@ -69,6 +69,8 @@ import org.lwjgl.opengl.GL12;
  * (colour = min(T, U * (0.4 + 0.6 * (c0 * D0 + c1 * D1)))). With {@code t}, a last layer T holds
  * the texture colours before the vertex tint (the cap of that min); otherwise T equals U.</li>
  * <li>{@code glint}: the enchantment glint was taken out of the layers; the site draws it.</li>
+ * <li>{@code random}: the stack looks different on every render (Infinity's pulse, Six-Phased Copper's
+ * glitch); the frames are samples and the site shows a random one on every display frame.</li>
  * </ul>
  *
  * <p>Layers are stored at the smallest of 32, 64, 128 or 256 px that loses nothing: a layer is
@@ -82,9 +84,17 @@ public final class QuestStackIconExporter {
     private static final int ITEM_XY = (CANVAS - 16) / 2;
     /** Ticks between the two renders that decide whether a stack is animated. */
     private static final int ANIMATION_PROBE_TICKS = 7;
-    /** Ticks recorded for an animated stack; the loop period is searched up to half of this. */
-    private static final int ANIMATION_RECORD_TICKS = Integer.getInteger("gtnh.oracle.animationTicks", 96);
-    private static final int MAX_ANIMATION_FRAMES = Integer.getInteger("gtnh.oracle.maxAnimationFrames", 48);
+    /** Longest loop searched for, in game ticks (GT nanites loop every 90, Gaia Spirit every 180). */
+    private static final int ANIMATION_MAX_TICKS = Integer.getInteger("gtnh.oracle.animationTicks", 400);
+    private static final int MAX_ANIMATION_FRAMES = Integer.getInteger("gtnh.oracle.maxAnimationFrames", 240);
+    /** Tallest strip written; browsers cap canvases at 16384 or 32767 px a side. */
+    private static final int MAX_STRIP_HEIGHT = 16384;
+    /** Frames kept of a stack that changes on every render (random or clock-driven effects). */
+    private static final int RANDOM_FRAMES = 16;
+    /** Real time before the second render that tells whether a stack changes by itself (GT's glitch frames last 10 ms). */
+    private static final long RANDOM_CHECK_MS = 12L;
+    /** Real time between the frames kept of such a stack. */
+    private static final long RANDOM_FRAME_SPACING_MS = 23L;
     private static final long FRAME_BUDGET_MS = 250L;
     private static final ResourceLocation GLINT = new ResourceLocation("textures/misc/enchanted_item_glint.png");
 
@@ -136,7 +146,7 @@ public final class QuestStackIconExporter {
         private final Map<String, String> manifest = new LinkedHashMap<String, String>();
         private final File outDir = new File(ClientItemStackIconRenderer.iconDir(), "quest");
         private int index;
-        private int rendered, lit, animated, glint, noItem, invisible, failed;
+        private int rendered, lit, animated, random, clockDriven, tooLong, glint, noItem, invisible, failed;
         private boolean finished;
 
         private ExportScreen(List<JsonObject> entries, Runnable after) {
@@ -163,8 +173,9 @@ public final class QuestStackIconExporter {
                 if (index % 256 == 0 || index == entries.size()) {
                     GtnhCalcOracleMod.LOG.info(
                         "GTNH quest stack icon progress " + index + "/" + entries.size() + " (rendered " + rendered
-                            + ", lit " + lit + ", animated " + animated + ", glint " + glint + ", no item " + noItem
-                            + ", invisible " + invisible + ", failed " + failed + ").");
+                            + ", lit " + lit + ", animated " + animated + ", random " + random
+                            + ", clock-driven still " + clockDriven + ", too long " + tooLong + ", glint " + glint
+                            + ", no item " + noItem + ", invisible " + invisible + ", failed " + failed + ").");
                 }
             }
             if (index >= entries.size()) {
@@ -191,6 +202,7 @@ public final class QuestStackIconExporter {
             Minecraft mc = Minecraft.getMinecraft();
             TextureManager textures = mc.getTextureManager();
             int[] withGlint = render(stack, Lights.GUI);
+            long renderedAt = System.currentTimeMillis();
             boolean mayGlint = hasEffect(stack);
             boolean blank = false;
             ITextureObject realGlint = textures.getTexture(GLINT);
@@ -212,6 +224,27 @@ public final class QuestStackIconExporter {
                     return;
                 }
                 boolean hasGlint = mayGlint && !same(withGlint, base);
+
+                // A stack that changes between two renders with no tick in between has a random or
+                // clock-driven effect. Keep samples of it as they are; the lighting split below compares
+                // renders and would mistake those changes for lighting.
+                List<int[]> samples = mayGlint ? null : randomSamples(stack, base, renderedAt);
+                if (samples != null) {
+                    String file = ClientItemStackIconRenderer.sha1(key).substring(0, 16) + ".png";
+                    writeStrip(new File(outDir, file), samples);
+                    StringBuilder json = new StringBuilder();
+                    json.append("{\"name\":").append(jsonString(name)).append(",\"icon\":")
+                        .append(jsonString("quest/" + file));
+                    if (samples.size() > 1) {
+                        json.append(",\"frames\":").append(samples.size()).append(",\"random\":1");
+                        random++;
+                        animated++;
+                    } else clockDriven++;
+                    json.append('}');
+                    manifest.put(key, json.toString());
+                    rendered++;
+                    return;
+                }
 
                 List<int[]> extra = new ArrayList<int[]>();
                 boolean isLit = false, hasT = false;
@@ -239,13 +272,39 @@ public final class QuestStackIconExporter {
                 Lights setup = isLit ? Lights.UNLIT : Lights.GUI;
                 List<int[]> frames = new ArrayList<int[]>();
                 List<Integer> ticks = new ArrayList<Integer>();
+                List<int[]> guiFrames = isLit ? new ArrayList<int[]>() : null;
                 frames.add(isLit ? unlit : base);
                 ticks.add(Integer.valueOf(1));
                 // A baked glint moves with time, which would look like an animation.
-                if (!baked) recordAnimation(stack, setup, frames, ticks);
+                if (!baked) recordAnimation(stack, setup, frames, ticks, guiFrames);
+                if (isLit && frames.size() > 1) {
+                    // The light layer comes from the first frame. If the item moves (Transcendent Metal
+                    // spins), its lighting changes from frame to frame: keep the lit frames instead.
+                    int[] d = extra.get(0);
+                    boolean holds = true;
+                    for (int i = 0; i < frames.size() && holds; i++) {
+                        int[] cap = hasT ? scaledTexture(extra.get(1), frames.get(0), frames.get(i)) : frames.get(i);
+                        holds = reconstructs(guiFrames.get(i), frames.get(i), d, cap);
+                    }
+                    if (!holds) {
+                        isLit = false;
+                        hasT = false;
+                        extra.clear();
+                        frames.clear();
+                        frames.addAll(guiFrames);
+                    }
+                }
 
                 List<int[]> layers = new ArrayList<int[]>(frames);
                 layers.addAll(extra);
+                if (frames.size() > 1 && layerSize(layers) * layers.size() > MAX_STRIP_HEIGHT) {
+                    // Browsers (and the site's relighting canvas) refuse images this tall: keep it still.
+                    tooLong++;
+                    frames.subList(1, frames.size()).clear();
+                    ticks.subList(1, ticks.size()).clear();
+                    layers = new ArrayList<int[]>(frames);
+                    layers.addAll(extra);
+                }
                 String file = ClientItemStackIconRenderer.sha1(key).substring(0, 16) + ".png";
                 writeStrip(new File(outDir, file), layers);
 
@@ -297,49 +356,199 @@ public final class QuestStackIconExporter {
     // ---------------------------------------------------------------- animation
 
     /**
-     * Steps the texture animations one game tick at a time. If the stack changes within a few ticks,
-     * records {@link #ANIMATION_RECORD_TICKS} ticks, finds the shortest loop and keeps each distinct
-     * frame with its length. Replaces the single frame in {@code frames} when animated.
+     * Steps the game one tick at a time (texture animations and GregTech's animation counter). If the
+     * stack changes within a few ticks, renders tick by tick until the first frames come round again
+     * (up to {@link #ANIMATION_MAX_TICKS}) and keeps each distinct frame of that loop with its length.
+     * Replaces the single frame in {@code frames} when animated.
      */
-    private static void recordAnimation(ItemStack stack, Lights setup, List<int[]> frames, List<Integer> ticks)
+    private static void recordAnimation(
+        ItemStack stack, Lights setup, List<int[]> frames, List<Integer> ticks, List<int[]> guiFrames)
         throws Exception {
-        TextureManager textures = Minecraft.getMinecraft().getTextureManager();
-        for (int i = 0; i < ANIMATION_PROBE_TICKS; i++) textures.tick();
+        for (int i = 0; i < ANIMATION_PROBE_TICKS; i++) tickGame();
         int[] probe = render(stack, setup);
         if (same(probe, frames.get(0))) return;
 
         List<int[]> seq = new ArrayList<int[]>();
+        List<int[]> gui = new ArrayList<int[]>();
         seq.add(probe);
-        for (int i = 1; i < ANIMATION_RECORD_TICKS; i++) {
-            textures.tick();
+        if (guiFrames != null) gui.add(render(stack, Lights.GUI));
+        int period = -1;
+        // Look for an exact loop while recording, so most stacks stop as soon as theirs closes.
+        for (int i = 1; i < ANIMATION_MAX_TICKS + LOOP_CHECK && period < 0; i++) {
+            tickGame();
             seq.add(render(stack, setup));
+            if (guiFrames != null) gui.add(render(stack, Lights.GUI));
+            period = loopEndingAt(seq, i, true);
         }
-        int period = seq.size();
-        for (int p = 1; p <= seq.size() / 2; p++) {
-            boolean loops = true;
-            for (int i = 0; i + p < seq.size() && loops; i++) loops = same(seq.get(i), seq.get(i + p));
-            if (loops) {
-                period = p;
-                break;
-            }
-        }
+        // Then accept a loop that only nearly closes (a spin that is a fraction of a degree off).
+        for (int i = 1; i < seq.size() && period < 0; i++) period = loopEndingAt(seq, i, false);
+        if (period < 0) return; // no loop found: keep the still frame
         List<int[]> outFrames = new ArrayList<int[]>();
+        List<int[]> outGui = new ArrayList<int[]>();
         List<Integer> outTicks = new ArrayList<Integer>();
         for (int i = 0; i < period; i++) {
             int[] f = seq.get(i);
-            if (!outFrames.isEmpty() && same(outFrames.get(outFrames.size() - 1), f)) {
+            boolean repeat = !outFrames.isEmpty() && same(outFrames.get(outFrames.size() - 1), f)
+                && (guiFrames == null || same(outGui.get(outGui.size() - 1), gui.get(i)));
+            if (repeat) {
                 int last = outTicks.size() - 1;
                 outTicks.set(last, Integer.valueOf(outTicks.get(last).intValue() + 1));
             } else {
                 outFrames.add(f);
+                if (guiFrames != null) outGui.add(gui.get(i));
                 outTicks.add(Integer.valueOf(1));
             }
         }
-        if (outFrames.size() < 2 || outFrames.size() > MAX_ANIMATION_FRAMES) return; // static, or changing by time
+        if (outFrames.size() < 2 || outFrames.size() > MAX_ANIMATION_FRAMES) return;
         frames.clear();
         frames.addAll(outFrames);
         ticks.clear();
         ticks.addAll(outTicks);
+        if (guiFrames != null) {
+            guiFrames.clear();
+            guiFrames.addAll(outGui);
+        }
+    }
+
+    /** The site's texture cap for a later frame: T scaled by how that frame's colour compares with the first's. */
+    private static int[] scaledTexture(int[] tex, int[] first, int[] frame) {
+        int[] out = new int[tex.length];
+        for (int i = 0; i < tex.length; i++) {
+            int v = 0xFF000000;
+            for (int c = 0; c <= 16; c += 8) {
+                int t = (tex[i] >> c) & 255, f = (first[i] >> c) & 255, u = (frame[i] >> c) & 255;
+                v |= Math.min(255, f == 0 ? t : t * u / f) << c;
+            }
+            out[i] = v;
+        }
+        return out;
+    }
+
+    /** Frames compared to accept a loop, so a frame that merely repeats inside it does not cut it short. */
+    private static final int LOOP_CHECK = 8;
+
+    /**
+     * The loop period p whose check completes with frame {@code i}: frames p .. p + c - 1 match frames
+     * 0 .. c - 1, where c = min(p, LOOP_CHECK). Exactly, or with {@link #close} when not exact. -1 if none.
+     */
+    private static int loopEndingAt(List<int[]> seq, int i, boolean exact) {
+        int[] candidates = { i - LOOP_CHECK + 1, (i + 1) % 2 == 0 ? (i + 1) / 2 : -1 };
+        for (int p : candidates) {
+            int check = Math.min(p, LOOP_CHECK);
+            if (p < 2 || p + check - 1 != i) continue;
+            boolean loops = true;
+            for (int j = 0; j < check && loops; j++) {
+                loops = exact ? same(seq.get(j), seq.get(p + j)) : close(seq.get(j), seq.get(p + j));
+            }
+            if (loops) return p;
+        }
+        return -1;
+    }
+
+    /**
+     * Renders the stack again, {@link #RANDOM_CHECK_MS} after {@code first} and without advancing
+     * the game. Null if nothing changed. Otherwise {@link #RANDOM_FRAMES} renders taken
+     * {@link #RANDOM_FRAME_SPACING_MS} apart:
+     * when they jump about (Infinity's random pulse, Six-Phased Copper's glitch), all of them, for the
+     * site to pick from at random; when they drift smoothly with the clock (the Universium and cosmic
+     * shaders, which loop only every few minutes), just the first, as a still icon.
+     */
+    private static List<int[]> randomSamples(ItemStack stack, int[] first, long firstAt) throws Exception {
+        long wait = firstAt + RANDOM_CHECK_MS - System.currentTimeMillis();
+        if (wait > 0) Thread.sleep(wait);
+        int[] again = render(stack, Lights.GUI);
+        if (same(again, first)) return null;
+        List<int[]> out = new ArrayList<int[]>();
+        out.add(first);
+        out.add(again);
+        while (out.size() < RANDOM_FRAMES) {
+            Thread.sleep(RANDOM_FRAME_SPACING_MS);
+            out.add(render(stack, Lights.GUI));
+        }
+        long near = differingPixels(out.get(0), out.get(1)), far = 0;
+        for (int k = RANDOM_FRAMES / 2; k < RANDOM_FRAMES; k++) far += differingPixels(out.get(0), out.get(k));
+        far /= RANDOM_FRAMES - RANDOM_FRAMES / 2;
+        if (far > 2 * Math.max(near, 16L)) {
+            List<int[]> still = new ArrayList<int[]>();
+            still.add(first);
+            return still;
+        }
+        return out;
+    }
+
+    private static long differingPixels(int[] a, int[] b) {
+        long n = 0;
+        for (int i = 0; i < a.length; i++) {
+            int x = a[i], y = b[i];
+            if (x == y) continue;
+            for (int c = 0; c <= 24; c += 8) {
+                if (Math.abs(((x >>> c) & 255) - ((y >>> c) & 255)) > 8) {
+                    n++;
+                    break;
+                }
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Equal, or so nearly equal that a loop may restart there: GregTech's Transcendent Metal turns
+     * 3.5 degrees a tick, so after 103 ticks it is half a degree past where it started.
+     */
+    private static boolean close(int[] a, int[] b) {
+        if (same(a, b)) return true;
+        int shown = 0, differ = 0;
+        for (int i = 0; i < a.length; i++) {
+            int x = a[i], y = b[i];
+            if (((x | y) >>> 24) == 0) continue;
+            shown++;
+            if (x == y) continue;
+            for (int c = 0; c <= 24; c += 8) {
+                if (Math.abs(((x >>> c) & 255) - ((y >>> c) & 255)) > 24) {
+                    differ++;
+                    break;
+                }
+            }
+        }
+        return shown > 0 && differ * 100 <= shown;
+    }
+
+    // GregTech's own animation counter (GTClient.mAnimationTick), which its item renderers read through
+    // getAnimationRenderTicks(): Transcendent Metal's spin, Prismatic Naquadah's and Gaia Spirit's colours.
+    private static Object gtClient;
+    private static java.lang.reflect.Field gtAnimationTick;
+    private static boolean gtLookedUp;
+
+    /** One game tick for everything an item render can animate with. */
+    private static void tickGame() {
+        Minecraft.getMinecraft().getTextureManager().tick();
+        if (!gtLookedUp) {
+            gtLookedUp = true;
+            try {
+                gtClient = Class.forName("gregtech.GTMod").getMethod("clientProxy").invoke(null);
+                for (Class<?> c = gtClient.getClass(); c != null && gtAnimationTick == null; c = c.getSuperclass()) {
+                    try {
+                        gtAnimationTick = c.getDeclaredField("mAnimationTick");
+                        gtAnimationTick.setAccessible(true);
+                        java.lang.reflect.Field partial = c.getDeclaredField("renderTickTime");
+                        partial.setAccessible(true);
+                        partial.setFloat(gtClient, 0F);
+                    } catch (NoSuchFieldException ignored) {
+                        // keep looking in the superclass
+                    }
+                }
+            } catch (Throwable t) {
+                GtnhCalcOracleMod.LOG.warn("GregTech's animation counter is not reachable; its effects stay still: " + t);
+                gtAnimationTick = null;
+            }
+        }
+        if (gtAnimationTick != null) {
+            try {
+                gtAnimationTick.setLong(gtClient, gtAnimationTick.getLong(gtClient) + 1L);
+            } catch (Throwable ignored) {
+                gtAnimationTick = null;
+            }
+        }
     }
 
     // ---------------------------------------------------------------- lighting layers

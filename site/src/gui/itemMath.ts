@@ -63,3 +63,11 @@ export function frameAt(ticks: number[], ms: number): number {
   return 0;
 }
 
+
+/** Sample shown for a randomly animated icon: a new one about every display frame (60 a second). */
+export function randomFrame(frames: number, ms: number): number {
+  let h = Math.floor(ms / (1000 / 60)) | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  return ((h ^ (h >>> 16)) >>> 0) % frames;
+}

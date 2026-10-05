@@ -119,6 +119,7 @@ interface QuestIcon {
   lit?: number;
   t?: number;
   glint?: number;
+  random?: number;
 }
 const questManifestFile = join(resolve(iconsArg), 'quest', 'manifest.json');
 const questIcons: Record<string, QuestIcon> = existsSync(questManifestFile)
@@ -135,7 +136,8 @@ for (const [key, q] of Object.entries(questIcons)) {
     info.i = q.icon;
     if (q.frames && q.frames > 1) {
       info.f = q.frames;
-      info.t = q.ticks;
+      if (q.random) info.r = 1;
+      else info.t = q.ticks;
     }
     if (q.lit) info.l = q.t ? 2 : 1;
     if (q.glint) info.g = 1;
@@ -228,6 +230,7 @@ for (const key of [...needed].sort()) {
     delete info.t;
     delete info.l;
     delete info.g;
+    delete info.r;
     noIcon++;
   }
   out[key] = info;

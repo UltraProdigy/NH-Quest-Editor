@@ -2,9 +2,13 @@
 //
 // Icons rendered from the exact quest stacks (exporter QuestStackIconExporter) are vertical strips
 // of square layers: animation frames, then for lit items a light layer and an optional texture
-// layer. Three things the game does at draw time are redone here:
+// layer. Layers are 32 to 256 px (the exporter stores each icon at the smallest size that loses
+// nothing), and everything here works in the image's own pixels. Three things the game does at draw
+// time are redone here:
 //
-// - Animated textures: the frame is picked from the game-tick clock (20 ticks a second).
+// - Animations: the frame is picked from the game-tick clock (20 ticks a second). Items that change
+//   on every render (Infinity's random pulse, a glitch) come as samples, and a random one is shown on
+//   each display frame.
 // - Lighting: BetterQuesting scales items with glScalef(k, k, 1) (ItemTexture's size / 16 times the
 //   quest map zoom) before RenderItem sets up the GUI item lights. Because z is not scaled, the
 //   lights and normals tilt and large or zoomed-in blocks come out darker. The exporter splits a
@@ -18,7 +22,7 @@ import { image, siteUrl } from './assets.ts';
 import { type Gfx } from './core.ts';
 import { animating } from './frame.ts';
 import type { ItemInfo } from '../lib/model.ts';
-import { lightScale, frameAt } from './itemMath.ts';
+import { lightScale, frameAt, randomFrame } from './itemMath.ts';
 
 // ---------------------------------------------------------------- lighting
 
@@ -202,7 +206,10 @@ function drawGlint(
 export function drawIcon(gfx: Gfx, img: HTMLImageElement, info: ItemInfo, x: number, y: number, size: number) {
   const S = img.width;
   let frame = 0;
-  if (info.f && info.f > 1 && info.t) {
+  if (info.f && info.f > 1 && info.r) {
+    animating(true);
+    frame = randomFrame(info.f, gfx.now);
+  } else if (info.f && info.f > 1 && info.t) {
     animating();
     frame = frameAt(info.t, gfx.now);
   }

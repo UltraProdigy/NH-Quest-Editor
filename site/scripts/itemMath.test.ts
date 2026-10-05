@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lightScale, frameAt } from '../src/gui/itemMath.ts';
+import { lightScale, frameAt, randomFrame } from '../src/gui/itemMath.ts';
 
 test('GUI item lights are unchanged at scale 1', () => {
   const [c0, c1] = lightScale(1);
@@ -25,4 +25,19 @@ test('animation frames follow the game tick clock', () => {
   assert.equal(frameAt(ticks, 150), 2);
   assert.equal(frameAt(ticks, 299), 2);
   assert.equal(frameAt(ticks, 300), 0);
+});
+
+test('randomFrame picks every sample, a new one about every display frame', () => {
+  const seen = new Set<number>();
+  let changes = 0;
+  let last = -1;
+  for (let ms = 0; ms < 2000; ms += 1000 / 60) {
+    const f = randomFrame(16, ms);
+    assert.ok(f >= 0 && f < 16);
+    seen.add(f);
+    if (f !== last) changes++;
+    last = f;
+  }
+  assert.equal(seen.size, 16);
+  assert.ok(changes > 100);
 });

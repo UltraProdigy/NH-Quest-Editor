@@ -91,6 +91,11 @@ export interface ItemInfo {
   l?: 1 | 2;
   /** Draw the enchantment glint over it. */
   g?: 1;
+  /**
+   * The item looks different on every render (a random pulse or a clock-driven glitch): the frames
+   * are samples, and one is picked at random on every display frame.
+   */
+  r?: 1;
 }
 
 export interface ItemIndex {
