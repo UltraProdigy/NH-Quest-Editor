@@ -87,8 +87,11 @@ public final class QuestStackIconExporter {
     /** Longest loop searched for, in game ticks (GT nanites loop every 90, Gaia Spirit every 180). */
     private static final int ANIMATION_MAX_TICKS = Integer.getInteger("gtnh.oracle.animationTicks", 400);
     private static final int MAX_ANIMATION_FRAMES = Integer.getInteger("gtnh.oracle.maxAnimationFrames", 240);
-    /** Tallest strip written; browsers cap canvases at 16384 or 32767 px a side. */
-    private static final int MAX_STRIP_HEIGHT = 16384;
+    /** Tallest strip written; browsers cap canvases at 32767 px a side. */
+    private static final int MAX_STRIP_HEIGHT = 32760;
+    /** Frames recorded for one turn of a GregTech spin (Transcendent Metal: 3.5 degrees a tick). */
+    private static final int SPIN_FRAMES = 103;
+    private static final float SPIN_DEGREES_PER_TICK = 3.5F;
     /** Frames kept of a stack that changes on every render (random or clock-driven effects). */
     private static final int RANDOM_FRAMES = 16;
     /** Real time before the second render that tells whether a stack changes by itself (GT's glitch frames last 10 ms). */
@@ -225,9 +228,25 @@ public final class QuestStackIconExporter {
                 }
                 boolean hasGlint = mayGlint && !same(withGlint, base);
 
+                List<int[]> extra = new ArrayList<int[]>();
+                boolean isLit = false, hasT = false;
+                int[] unlit = render(stack, Lights.UNLIT);
+                if (!same(unlit, base)) {
+                    int[] d = diffuseLayer(unlit, render(stack, Lights.LIGHT0), render(stack, Lights.LIGHT1));
+                    int[] tex = render(stack, Lights.TEXTURE);
+                    if (!hasGlint && reconstructs(base, unlit, d, tex)) {
+                        isLit = true;
+                        extra.add(d);
+                        if (!same(tex, unlit)) {
+                            hasT = true;
+                            extra.add(tex);
+                        }
+                    }
+                }
                 // A stack that changes between two renders with no tick in between has a random or
-                // clock-driven effect. Keep samples of it as they are; the lighting split below compares
-                // renders and would mistake those changes for lighting.
+                // clock-driven effect. Keep samples of it as they are and drop the lighting split above,
+                // which compares renders and mistakes those changes for lighting. (Checked after the
+                // lighting renders, so that the wait for the clock to move is mostly spent already.)
                 List<int[]> samples = mayGlint ? null : randomSamples(stack, base, renderedAt);
                 if (samples != null) {
                     String file = ClientItemStackIconRenderer.sha1(key).substring(0, 16) + ".png";
@@ -246,21 +265,6 @@ public final class QuestStackIconExporter {
                     return;
                 }
 
-                List<int[]> extra = new ArrayList<int[]>();
-                boolean isLit = false, hasT = false;
-                int[] unlit = render(stack, Lights.UNLIT);
-                if (!same(unlit, base)) {
-                    int[] d = diffuseLayer(unlit, render(stack, Lights.LIGHT0), render(stack, Lights.LIGHT1));
-                    int[] tex = render(stack, Lights.TEXTURE);
-                    if (!hasGlint && reconstructs(base, unlit, d, tex)) {
-                        isLit = true;
-                        extra.add(d);
-                        if (!same(tex, unlit)) {
-                            hasT = true;
-                            extra.add(tex);
-                        }
-                    }
-                }
                 boolean baked = false;
                 if (hasGlint && !isLit && !same(unlit, base)) {
                     // A lit item with a glint: the site can't relight under a glint, so keep this one baked.
@@ -364,25 +368,43 @@ public final class QuestStackIconExporter {
     private static void recordAnimation(
         ItemStack stack, Lights setup, List<int[]> frames, List<Integer> ticks, List<int[]> guiFrames)
         throws Exception {
-        for (int i = 0; i < ANIMATION_PROBE_TICKS; i++) tickGame();
+        // Render before every tick. GTNH only advances the animations of textures drawn since the
+        // last tick, so ticks without a render in between would leave a frame out of step.
+        for (int i = 0; i < ANIMATION_PROBE_TICKS; i++) {
+            tickGame();
+            render(stack, setup);
+        }
+        tickGame();
         int[] probe = render(stack, setup);
         if (same(probe, frames.get(0))) return;
 
         List<int[]> seq = new ArrayList<int[]>();
+        List<Integer> hashes = new ArrayList<Integer>();
         List<int[]> gui = new ArrayList<int[]>();
-        seq.add(probe);
-        if (guiFrames != null) gui.add(render(stack, Lights.GUI));
         int period = -1;
-        // Look for an exact loop while recording, so most stacks stop as soon as theirs closes.
-        for (int i = 1; i < ANIMATION_MAX_TICKS + LOOP_CHECK && period < 0; i++) {
+        for (int i = 0; i < ANIMATION_MAX_TICKS + LOOP_CHECK_MAX && period < 0; i++) {
             tickGame();
-            seq.add(render(stack, setup));
+            int[] f = render(stack, setup);
+            seq.add(f);
+            hashes.add(Integer.valueOf(java.util.Arrays.hashCode(f)));
             if (guiFrames != null) gui.add(render(stack, Lights.GUI));
-            period = loopEndingAt(seq, i, true);
+            period = loopEndingAt(seq, hashes, i);
         }
-        // Then accept a loop that only nearly closes (a spin that is a fraction of a degree off).
-        for (int i = 1; i < seq.size() && period < 0; i++) period = loopEndingAt(seq, i, false);
-        if (period < 0) return; // no loop found: keep the still frame
+        if (period < 0) {
+            // GregTech's spin turns 3.5 degrees a tick, so it comes round only every 102.86 ticks and
+            // never closes on a whole tick. Record one turn in even steps of GregTech's counter instead.
+            if (!recordSpin(stack, setup, seq, gui, guiFrames != null)) return;
+            period = seq.size();
+            ticks.clear();
+            frames.clear();
+            frames.addAll(seq);
+            for (int i = 0; i < period; i++) ticks.add(Integer.valueOf(1));
+            if (guiFrames != null) {
+                guiFrames.clear();
+                guiFrames.addAll(gui);
+            }
+            return;
+        }
         List<int[]> outFrames = new ArrayList<int[]>();
         List<int[]> outGui = new ArrayList<int[]>();
         List<Integer> outTicks = new ArrayList<Integer>();
@@ -410,6 +432,38 @@ public final class QuestStackIconExporter {
         }
     }
 
+    /**
+     * If the stack changes when only GregTech's counter moves, renders {@link #SPIN_FRAMES} frames over
+     * one turn of the spin (360 / 3.5 counter ticks) into {@code seq} (and GUI-lit ones into {@code gui})
+     * and returns true. The frames are one game tick apart on the site, which is 0.1% slow.
+     */
+    private static boolean recordSpin(ItemStack stack, Lights setup, List<int[]> seq, List<int[]> gui, boolean withGui)
+        throws Exception {
+        if (gtAnimationTick == null || gtRenderTickTime == null) return false;
+        long base = gtAnimationTick.getLong(gtClient);
+        int[] first = render(stack, setup);
+        setGtCounter(base, 1.0);
+        boolean moves = !same(first, render(stack, setup));
+        setGtCounter(base, 0.0);
+        if (!moves) return false;
+        seq.clear();
+        gui.clear();
+        double step = 360.0 / SPIN_DEGREES_PER_TICK / SPIN_FRAMES;
+        for (int n = 0; n < SPIN_FRAMES; n++) {
+            setGtCounter(base, n * step);
+            seq.add(render(stack, setup));
+            if (withGui) gui.add(render(stack, Lights.GUI));
+        }
+        setGtCounter(base, 0.0);
+        return true;
+    }
+
+    private static void setGtCounter(long base, double offset) throws Exception {
+        long whole = (long) Math.floor(offset);
+        gtAnimationTick.setLong(gtClient, base + whole);
+        gtRenderTickTime.setFloat(gtClient, (float) (offset - whole));
+    }
+
     /** The site's texture cap for a later frame: T scaled by how that frame's colour compares with the first's. */
     private static int[] scaledTexture(int[] tex, int[] first, int[] frame) {
         int[] out = new int[tex.length];
@@ -424,21 +478,29 @@ public final class QuestStackIconExporter {
         return out;
     }
 
-    /** Frames compared to accept a loop, so a frame that merely repeats inside it does not cut it short. */
-    private static final int LOOP_CHECK = 8;
+    /**
+     * Ticks compared to accept a loop of p ticks: a whole period, but at least 16 and at most 48. A
+     * cell's small window onto an animated fluid repeats a frame now and then, so a short check would
+     * take a repeat inside the loop for its end.
+     */
+    private static final int LOOP_CHECK_MIN = 16;
+    private static final int LOOP_CHECK_MAX = 48;
+
+    private static int loopCheck(int p) {
+        return Math.min(Math.max(p, LOOP_CHECK_MIN), LOOP_CHECK_MAX);
+    }
 
     /**
-     * The loop period p whose check completes with frame {@code i}: frames p .. p + c - 1 match frames
-     * 0 .. c - 1, where c = min(p, LOOP_CHECK). Exactly, or with {@link #close} when not exact. -1 if none.
+     * The loop period p whose check completes with tick {@code i}: ticks p .. p + c - 1 equal ticks
+     * 0 .. c - 1, with c = loopCheck(p). -1 if none.
      */
-    private static int loopEndingAt(List<int[]> seq, int i, boolean exact) {
-        int[] candidates = { i - LOOP_CHECK + 1, (i + 1) % 2 == 0 ? (i + 1) / 2 : -1 };
+    private static int loopEndingAt(List<int[]> seq, List<Integer> hashes, int i) {
+        int[] candidates = { i - LOOP_CHECK_MIN + 1, (i + 1) % 2 == 0 ? (i + 1) / 2 : -1, i - LOOP_CHECK_MAX + 1 };
         for (int p : candidates) {
-            int check = Math.min(p, LOOP_CHECK);
-            if (p < 2 || p + check - 1 != i) continue;
+            if (p < 2 || p + loopCheck(p) - 1 != i) continue;
             boolean loops = true;
-            for (int j = 0; j < check && loops; j++) {
-                loops = exact ? same(seq.get(j), seq.get(p + j)) : close(seq.get(j), seq.get(p + j));
+            for (int j = 0; j < loopCheck(p) && loops; j++) {
+                loops = hashes.get(j).intValue() == hashes.get(p + j).intValue() && same(seq.get(j), seq.get(p + j));
             }
             if (loops) return p;
         }
@@ -491,32 +553,11 @@ public final class QuestStackIconExporter {
         return n;
     }
 
-    /**
-     * Equal, or so nearly equal that a loop may restart there: GregTech's Transcendent Metal turns
-     * 3.5 degrees a tick, so after 103 ticks it is half a degree past where it started.
-     */
-    private static boolean close(int[] a, int[] b) {
-        if (same(a, b)) return true;
-        int shown = 0, differ = 0;
-        for (int i = 0; i < a.length; i++) {
-            int x = a[i], y = b[i];
-            if (((x | y) >>> 24) == 0) continue;
-            shown++;
-            if (x == y) continue;
-            for (int c = 0; c <= 24; c += 8) {
-                if (Math.abs(((x >>> c) & 255) - ((y >>> c) & 255)) > 24) {
-                    differ++;
-                    break;
-                }
-            }
-        }
-        return shown > 0 && differ * 100 <= shown;
-    }
-
     // GregTech's own animation counter (GTClient.mAnimationTick), which its item renderers read through
     // getAnimationRenderTicks(): Transcendent Metal's spin, Prismatic Naquadah's and Gaia Spirit's colours.
     private static Object gtClient;
     private static java.lang.reflect.Field gtAnimationTick;
+    private static java.lang.reflect.Field gtRenderTickTime;
     private static boolean gtLookedUp;
 
     /** One game tick for everything an item render can animate with. */
@@ -530,9 +571,9 @@ public final class QuestStackIconExporter {
                     try {
                         gtAnimationTick = c.getDeclaredField("mAnimationTick");
                         gtAnimationTick.setAccessible(true);
-                        java.lang.reflect.Field partial = c.getDeclaredField("renderTickTime");
-                        partial.setAccessible(true);
-                        partial.setFloat(gtClient, 0F);
+                        gtRenderTickTime = c.getDeclaredField("renderTickTime");
+                        gtRenderTickTime.setAccessible(true);
+                        gtRenderTickTime.setFloat(gtClient, 0F);
                     } catch (NoSuchFieldException ignored) {
                         // keep looking in the superclass
                     }
