@@ -17,7 +17,7 @@ export function resourceUrl(loc: string): string {
 
 export const siteUrl = (path: string) => `${BASE}${path.replace(/^\//, '')}`;
 
-type Entry = { img: HTMLImageElement; ok: boolean; failed: boolean };
+type Entry = { img: HTMLImageElement; ok: boolean; failed: boolean; waiting?: (() => void)[] };
 const images = new Map<string, Entry>();
 
 /** Returns the image if it has loaded, null otherwise (and starts loading it). */
@@ -29,6 +29,8 @@ export function image(url: string): HTMLImageElement | null {
     const entry = e;
     img.onload = () => {
       entry.ok = true;
+      for (const cb of entry.waiting ?? []) cb();
+      entry.waiting = undefined;
       invalidate();
     };
     img.onerror = () => (entry.failed = true);
@@ -39,6 +41,14 @@ export function image(url: string): HTMLImageElement | null {
 }
 
 export const texture = (loc: string) => image(resourceUrl(loc));
+
+/** Call `cb` once the image at `url` (already requested with image()) has loaded. */
+export function whenLoaded(url: string, cb: () => void) {
+  const e = images.get(url);
+  if (!e || e.failed) return;
+  if (e.ok) cb();
+  else (e.waiting ??= []).push(cb);
+}
 
 export function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {

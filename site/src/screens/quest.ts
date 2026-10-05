@@ -8,6 +8,7 @@ import {
 } from '../gui/widgets.ts';
 import { PopContextMenu } from '../gui/popup.ts';
 import { tr } from '../gui/lang.ts';
+import { texture as loadTexture, whenLoaded, resourceUrl } from '../gui/assets.ts';
 import { plainText, forceMonochrome } from '../gui/text.ts';
 import { stringWidth, stripFormatting } from '../gui/font.ts';
 import { quest as getQuest, prop, dependantsOf, isInAnyLine, shortId } from '../store.ts';
@@ -189,9 +190,16 @@ export class QuestScreen extends Screen {
     for (const m of text.matchAll(IMG)) {
       y += addText(text.slice(last, m.index));
       last = m.index! + m[0].length;
-      const h = Number(m[1]);
-      panels.push(new PanelGeneric(new Rect(0, y + 2, cs.transform.w(), h), new ImageTexture(m[2], true)));
-      y += h + 4;
+      // addQuestDescImageSegment: a picture too wide for the given height is shrunk to the
+      // container's width, and the panel's height follows. Lay out again once it has loaded.
+      let h = Number(m[1]);
+      const cw = cs.transform.w();
+      const img = loadTexture(m[2]);
+      if (img) {
+        if (cw / img.naturalWidth < h / img.naturalHeight) h = -Math.floor(-(img.naturalHeight * cw) / img.naturalWidth);
+      } else whenLoaded(resourceUrl(m[2]), () => this.host.screen === this && this.host.refresh());
+      panels.push(new PanelGeneric(new Rect(0, y + 2, cw, h), new ImageTexture(m[2], true)));
+      y += h + 2; // 2px above the picture, none below (as in BQ)
     }
     if (last < text.length && text.slice(last).trim()) addText(text.slice(last));
     cs.addAll(panels);
