@@ -228,11 +228,13 @@ export class Host {
       clearTimeout(this.animTimer);
       this.animTimer = 0;
     }
-    redraw.animating = false;
+    redraw.animating = redraw.smooth = false;
     this.frame();
     this.lastFrame = performance.now();
+    // Motion the viewer drives (zooming, trays) gets the next display frame.
+    if (redraw.smooth) this.invalidate();
     // Something on screen moves on its own: draw again, but no faster than the animation rate.
-    if (redraw.animating) {
+    else if (redraw.animating) {
       const wait = Math.max(0, ANIMATION_FRAME_MS - (performance.now() - this.lastFrame));
       this.animTimer = window.setTimeout(() => {
         this.animTimer = 0;

@@ -38,7 +38,7 @@ export class FloatIO implements ValueIO {
   read() {
     if (this.lerp && this.s !== this.v) {
       if (Math.abs(this.s - this.v) < 0.001) return (this.s = this.v);
-      animating();
+      animating(true);
       const now = performance.now();
       const d = now - this.t;
       this.s = this.s + (this.v - this.s) * Math.min(1, Math.max(0, d * this.speed));

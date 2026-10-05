@@ -40,16 +40,54 @@ function pixels(img: HTMLImageElement): Uint8ClampedArray {
 const LIT_CACHE_SIZE = 160;
 const litCache = new Map<string, HTMLCanvasElement>();
 
-/** The lit layer for one frame at modelview scale k (bucketed to 1/8 octave), cached. */
-export function relight(img: HTMLImageElement, info: ItemInfo, frame: number, k: number): HTMLCanvasElement {
-  const bucket = Math.round(Math.log2(Math.max(k, 1 / 64)) * 8);
-  const key = `${img.src}|${frame}|${bucket}`;
+// Relighting costs a pass over a 256x256 icon. While the quest map zooms, k crosses a bucket every
+// few frames for every lit icon on screen at once; doing them all in one frame stalls it. Each
+// frame gets a time budget: past it, an icon keeps its nearest already-lit bucket and is redone
+// in a later frame.
+const RELIGHT_BUDGET_MS = 4;
+let budgetFrame = -1;
+let budgetUsed = 0;
+
+function cached(key: string): HTMLCanvasElement | undefined {
   const hit = litCache.get(key);
   if (hit) {
     litCache.delete(key);
     litCache.set(key, hit);
-    return hit;
   }
+  return hit;
+}
+
+/**
+ * The lit layer for one frame at modelview scale k (bucketed to 1/8 octave), cached. `now` is the
+ * time of the frame being drawn, for the per-frame budget.
+ */
+export function relight(img: HTMLImageElement, info: ItemInfo, frame: number, k: number, now = -1): HTMLCanvasElement {
+  const bucket = Math.round(Math.log2(Math.max(k, 1 / 64)) * 8);
+  const base = `${img.src}|${frame}|`;
+  const hit = cached(base + bucket);
+  if (hit) return hit;
+  if (now !== budgetFrame) {
+    budgetFrame = now;
+    budgetUsed = 0;
+  }
+  if (budgetUsed >= RELIGHT_BUDGET_MS) {
+    for (let d = 1; d <= 24; d++) {
+      const near = litCache.get(base + (bucket - d)) ?? litCache.get(base + (bucket + d));
+      if (near) {
+        animating(true); // come back for the exact bucket
+        return near;
+      }
+    }
+  }
+  const started = performance.now();
+  const canvas = relightBucket(img, info, frame, bucket);
+  budgetUsed += performance.now() - started;
+  litCache.set(base + bucket, canvas);
+  if (litCache.size > LIT_CACHE_SIZE) litCache.delete(litCache.keys().next().value!);
+  return canvas;
+}
+
+function relightBucket(img: HTMLImageElement, info: ItemInfo, frame: number, bucket: number): HTMLCanvasElement {
   const [c0, c1] = lightScale(2 ** (bucket / 8));
   const S = img.width;
   const N = S * S * 4;
@@ -78,8 +116,6 @@ export function relight(img: HTMLImageElement, info: ItemInfo, frame: number, k:
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = S;
   canvas.getContext('2d')!.putImageData(out, 0, 0);
-  litCache.set(key, canvas);
-  if (litCache.size > LIT_CACHE_SIZE) litCache.delete(litCache.keys().next().value!);
   return canvas;
 }
 
@@ -174,7 +210,7 @@ export function drawIcon(gfx: Gfx, img: HTMLImageElement, info: ItemInfo, x: num
   let sy = frame * S;
   if (info.l && img.height >= S * ((info.f ?? 1) + info.l)) {
     const k = (size * gfx.s) / (16 * gfx.base);
-    src = relight(img, info, frame, k);
+    src = relight(img, info, frame, k, gfx.now);
     sy = 0;
   }
   gfx.icon(src, 0, sy, S, S, x - size / 2, y - size / 2, size * 2, size * 2);

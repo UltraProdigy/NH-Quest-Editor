@@ -268,7 +268,7 @@ export class RectLerp implements GuiRect {
   private blend() {
     if (this.dur <= 0) return 1;
     const b = Math.min(1, (performance.now() - this.t0) / this.dur);
-    if (b < 1) animating();
+    if (b < 1) animating(true);
     return b;
   }
   private idle() {

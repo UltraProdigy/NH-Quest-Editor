@@ -84,6 +84,14 @@ export class SlicedTexture implements GuiTexture {
       gfx.image(img, su * kx, sv * ky, sw * kx, sh * ky, dx, dy, dw, dh, argb);
     };
 
+    // At the texture's own size every slice mode puts each texel where one quad over the whole
+    // region would (the slices meet edge to edge at their source positions), so draw that one quad.
+    // Most quest frames are drawn this way; nine draws each made zooming the map slow.
+    if (width === tw && height === th) {
+      quad(x, y, width, height, u, v, tw, th);
+      return;
+    }
+
     // Too small for the borders: BQ draws at the minimum size and scales down to fit.
     const w = Math.max(width, l + r);
     const h = Math.max(height, t + b);
