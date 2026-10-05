@@ -59,7 +59,7 @@ import org.lwjgl.opengl.GL12;
  * {@code {"k": key, "id": registry name, "dmg": damage, "tag": BetterQuesting typed NBT JSON text}}.
  *
  * <p>Output in {@code <iconDir>/quest/}: one PNG per stack and {@code manifest.json}. A PNG is a
- * vertical strip of 256px layers:
+ * vertical strip of square layers:
  * <ul>
  * <li>frames: the item as the GUI draws it, one layer per animation frame ({@code ticks} gives each
  * frame's length in game ticks). Without {@code lit} the frames are the finished icon.</li>
@@ -70,6 +70,10 @@ import org.lwjgl.opengl.GL12;
  * the texture colours before the vertex tint (the cap of that min); otherwise T equals U.</li>
  * <li>{@code glint}: the enchantment glint was taken out of the layers; the site draws it.</li>
  * </ul>
+ *
+ * <p>Layers are stored at the smallest of 32, 64, 128 or 256 px that loses nothing: a layer is
+ * shrunk only while every block of pixels it merges has one colour, so nearest-neighbour enlarging
+ * gives back the 256 px render exactly. Flat 16 px items come out at 32 px.
  */
 public final class QuestStackIconExporter {
 
@@ -482,10 +486,47 @@ public final class QuestStackIconExporter {
         return false;
     }
 
+    /** Writes the layers as one vertical strip, at the smallest size that keeps every pixel (see the class notes). */
     private static void writeStrip(File file, List<int[]> layers) throws Exception {
-        BufferedImage image = new BufferedImage(SIZE, SIZE * layers.size(), BufferedImage.TYPE_INT_ARGB);
-        for (int i = 0; i < layers.size(); i++) image.setRGB(0, i * SIZE, SIZE, SIZE, layers.get(i), 0, SIZE);
+        int out = layerSize(layers);
+        int step = SIZE / out;
+        BufferedImage image = new BufferedImage(out, out * layers.size(), BufferedImage.TYPE_INT_ARGB);
+        int[] row = new int[out * out];
+        for (int i = 0; i < layers.size(); i++) {
+            int[] px = layers.get(i);
+            for (int y = 0; y < out; y++) {
+                for (int x = 0; x < out; x++) row[y * out + x] = px[y * step * SIZE + x * step];
+            }
+            image.setRGB(0, i * out, out, out, row, 0, out);
+        }
         ImageIO.write(image, "png", file);
+    }
+
+    /** Side of the layers as stored: the smallest that keeps every pixel. */
+    private static int layerSize(List<int[]> layers) {
+        int step = 1;
+        while (SIZE / (step * 2) >= CANVAS && SIZE % (step * 2) == 0 && uniformBlocks(layers, step * 2)) step *= 2;
+        return SIZE / step;
+    }
+
+    /** Whether every step x step block of every layer is one colour (fully transparent pixels count as equal). */
+    private static boolean uniformBlocks(List<int[]> layers, int step) {
+        for (int[] px : layers) {
+            for (int by = 0; by < SIZE; by += step) {
+                for (int bx = 0; bx < SIZE; bx += step) {
+                    int first = px[by * SIZE + bx];
+                    if ((first >>> 24) == 0) first = 0;
+                    for (int y = by; y < by + step; y++) {
+                        for (int x = bx; x < bx + step; x++) {
+                            int v = px[y * SIZE + x];
+                            if ((v >>> 24) == 0) v = 0;
+                            if (v != first) return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     // ---------------------------------------------------------------- stacks from BetterQuesting JSON
