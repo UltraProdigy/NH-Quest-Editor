@@ -84,7 +84,8 @@ export function fluidName(f: FluidRef): string {
   return lookup(fluidKey(f.fluid))?.n ?? f.fluid;
 }
 
-const modName = (modId?: string) => (modId ? (mods[modId] ?? modId) : undefined);
+/** Mod line of item tooltips (Waila: the registry domain's owning mod, "Minecraft" for vanilla). */
+const modName = (modId?: string) => (modId ? (mods[modId] ?? (modId === 'minecraft' ? 'Minecraft' : modId)) : undefined);
 
 export function itemTooltip(ref: ItemRef | string, advanced = false): string[] {
   const key = typeof ref === 'string' ? ref : refKey(ref);

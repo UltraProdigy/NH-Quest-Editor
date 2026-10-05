@@ -52,6 +52,8 @@ function itemTaskPanel(
   return c;
 }
 
+// Names come from the export (WorldProvider.getDimensionName, as TaskLocation.getDimName); this table
+// only covers data built from an older export. BQ shows the bare number for unknown dimensions.
 const DIMENSIONS: Record<number, string> = { 0: 'Overworld', [-1]: 'Nether', 1: 'The End', 7: 'Twilight Forest' };
 let extraDims: Record<string, string> = {};
 let entityNames: Record<string, string> = {};
@@ -59,7 +61,7 @@ export function setGameNames(dims: Record<string, string> | undefined, entities:
   extraDims = dims ?? {};
   entityNames = entities ?? {};
 }
-const dimName = (d: number) => extraDims[String(d)] ?? DIMENSIONS[d] ?? `DIM${d}`;
+const dimName = (d: number) => extraDims[String(d)] ?? DIMENSIONS[d] ?? String(d);
 const entityName = (id: string) => entityNames[id] ?? (id.includes('.') ? id.slice(id.indexOf('.') + 1) : id);
 
 export function taskPanel(task: TaskData, rect: GuiRect): Panel | null {

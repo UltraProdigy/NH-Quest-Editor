@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.Loader;
+import cpw.mods.fml.common.ModContainer;
+import cpw.mods.fml.common.registry.GameData;
 import dev.gtnhplanner.calcoracle.icons.FluidStackIconExporter;
 import dev.gtnhplanner.calcoracle.icons.ItemStackIconExporter;
 import gregtech.api.enums.StoneType;
@@ -29,6 +31,8 @@ import net.minecraft.item.crafting.ShapelessRecipes;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.ChunkCoordinates;
 import net.minecraft.util.StatCollector;
+import net.minecraft.world.WorldProvider;
+import net.minecraftforge.common.DimensionManager;
 import net.minecraftforge.fluids.Fluid;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
@@ -111,6 +115,8 @@ public final class GtnhCalcOracleExporter {
         root.put("generatedAt", generatedAt);
         root.put("minecraftVersion", "1.7.10");
         root.put("loadedMods", loadedMods());
+        root.put("modNames", modNames());
+        root.put("dimensionNames", dimensionNames());
         root.put("adapters", adapters);
         root.put("domains", domains);
 
@@ -3630,6 +3636,66 @@ public final class GtnhCalcOracleExporter {
         }
         Collections.sort(mods);
         return mods;
+    }
+
+    /**
+     * Display name of the mod that owns each registry domain, as item tooltips show it (Waila's
+     * ModIdentification.nameFromStack: GameData.findModOwner, "Minecraft" when no mod owns it).
+     * Also keyed by every mod id, for anything that only knows the mod.
+     */
+    private Map<String, Object> modNames() {
+        Map<String, Object> names = new java.util.TreeMap<String, Object>();
+        for (ModContainer mod : Loader.instance().getModList()) {
+            try {
+                names.put(mod.getModId(), mod.getName());
+            } catch (Throwable ignored) {
+                // A broken container only loses its own entry.
+            }
+        }
+        for (Object key : Item.itemRegistry.getKeys()) {
+            String registryId = String.valueOf(key);
+            String domain = modId(registryId);
+            if (domain == null) {
+                continue;
+            }
+            try {
+                ModContainer owner = GameData.findModOwner(registryId);
+                names.put(domain, owner == null ? "Minecraft" : owner.getName());
+            } catch (Throwable ignored) {
+                // Keep the mod id entry, if any.
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Dimension names as BetterQuesting's location task shows them (TaskLocation.getDimName:
+     * DimensionManager.createProviderFor(dim).getDimensionName(), else the number).
+     */
+    private Map<String, Object> dimensionNames() {
+        Map<String, Object> names = new LinkedHashMap<String, Object>();
+        Integer[] ids;
+        try {
+            ids = DimensionManager.getStaticDimensionIDs();
+        } catch (Throwable error) {
+            return names;
+        }
+        Arrays.sort(ids);
+        for (Integer id : ids) {
+            if (id == null) {
+                continue;
+            }
+            try {
+                WorldProvider provider = DimensionManager.createProviderFor(id.intValue());
+                String name = provider == null ? null : provider.getDimensionName();
+                if (name != null && name.length() > 0) {
+                    names.put(String.valueOf(id), name);
+                }
+            } catch (Throwable ignored) {
+                // Providers that need a live world fall back to the number on the site, as in BQ.
+            }
+        }
+        return names;
     }
 
     private int countRecipes(List<Map<String, Object>> domains) {

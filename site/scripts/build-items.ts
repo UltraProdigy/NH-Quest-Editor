@@ -36,13 +36,21 @@ interface Resource {
 }
 
 // The export is read as a stream (it is several hundred MB, near V8's string limit). Only the
-// root's own members, the ore dictionary and the mob list are kept; every other
+// root's own members, the ore dictionary, the mob list and the name tables are kept; every other
 // object is looked at for item and fluid resources as it closes and then dropped.
 interface Domain {
   id: string;
   entries?: Record<string, Resource[]>;
   mobs?: { entityName: string; displayName: string }[];
 }
+interface ExportRoot {
+  generatedAt?: string;
+  /** Registry domain or mod id -> mod name, as tooltips show it (newer exports only). */
+  modNames?: Record<string, string>;
+  /** Dimension id -> name, as BQ's location task shows it (newer exports only). */
+  dimensionNames?: Record<string, string>;
+}
+const KEEP_ROOT = new Set(['modNames', 'dimensionNames']);
 const domains: Domain[] = [];
 
 // ---------------------------------------------------------------- collect every resource
@@ -82,8 +90,9 @@ function visit(v: unknown) {
 }
 
 console.time('read export');
-await parseJsonFile(resolve(exportArg), {
+const exp = (await parseJsonFile(resolve(exportArg), {
   mode(path, parent) {
+    if (path.length === 1) return KEEP_ROOT.has(path[0] as string) ? 'keep' : 'scan';
     if (path.length === 3 && path[0] === 'domains') {
       const id = (parent as Record<string, unknown>).id;
       if ((id === 'oreDictionary' && path[2] === 'entries') || (id === 'mobDrops' && path[2] === 'mobs')) return 'keep';
@@ -96,7 +105,7 @@ await parseJsonFile(resolve(exportArg), {
       visit(v); // resources inside the kept parts (ore dictionary members)
     } else if (!Array.isArray(v)) resource(v);
   },
-});
+})) as ExportRoot;
 console.timeEnd('read export');
 const book = JSON.parse(readFileSync(resolve(questsArg), 'utf8')) as QuestbookData;
 
@@ -226,20 +235,33 @@ for (const key of [...needed].sort()) {
 const ore: Record<string, string[]> = {};
 for (const name of [...oreNeeded].sort()) ore[name] = oreAll.get(name)!.filter((k) => out[k] || k.endsWith(`@${WILDCARD}`));
 
-const index: ItemIndex & { ore: Record<string, string[]>; iconDir: string } = {
+// Mod names for the tooltips' last line, keyed by registry domain (only the domains shipped).
+const mods: Record<string, string> = {};
+for (const key of Object.keys(out)) {
+  if (key.startsWith('fluid:')) continue;
+  const domain = key.slice(0, key.indexOf(':'));
+  const name = exp.modNames?.[domain] ?? exp.modNames?.[domain.toLowerCase()];
+  if (name) mods[domain] = name;
+  const m = out[key].m;
+  if (m && m !== domain && exp.modNames?.[m]) mods[m] = exp.modNames[m];
+}
+
+const index: ItemIndex & { ore: Record<string, string[]>; mods: Record<string, string>; iconDir: string } = {
   format: 1,
   generatedAt: new Date().toISOString(),
   source: { dailyTag: process.env.DAILY_TAG ?? '' },
   items: out,
   ore,
+  mods,
   iconDir: 'data/icons/',
 };
 writeFileSync(join(outDir, 'items.json'), JSON.stringify(index));
-writeFileSync(join(outDir, 'names.json'), JSON.stringify({ entities }));
+writeFileSync(join(outDir, 'names.json'), JSON.stringify({ entities, dimensions: exp.dimensionNames ?? {} }));
 
 console.log(
   `items: ${Object.keys(out).length} entries (${items.size} in export), ${copied} icons copied, ` +
-    `${noIcon} without icon, ${Object.keys(ore).length} ore names, ${Object.keys(entities).length} entity names`,
+    `${noIcon} without icon, ${Object.keys(ore).length} ore names, ${Object.keys(entities).length} entity names, ` +
+    `${Object.keys(mods).length} mod names, ${Object.keys(exp.dimensionNames ?? {}).length} dimension names`,
 );
 console.log(`quest items not in the export: ${missing.size}`);
 console.log([...missing].slice(0, 40).join('\n'));
