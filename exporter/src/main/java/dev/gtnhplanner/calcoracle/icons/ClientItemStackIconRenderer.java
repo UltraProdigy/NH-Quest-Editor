@@ -256,7 +256,7 @@ public final class ClientItemStackIconRenderer {
         if (isCapsuleStack(stack)) {
             ItemStack capsuleBase = new ItemStack(stack.getItem(), 1, 0);
             BufferedImage capsuleImage = renderStackToImage(capsuleBase);
-            if (imageHasVisiblePixels(capsuleImage) && missingTextureRatio(capsuleImage) <= 0.5D) {
+            if (imageHasVisiblePixels(capsuleImage) && !isMissingTexture(capsuleImage)) {
                 return capsuleImage;
             }
         }
@@ -458,7 +458,7 @@ public final class ClientItemStackIconRenderer {
         BufferedImage image = renderStackToImage(stack);
         applyMissingItemTint(stack, image);
         image = renderWithContainerBaseIfNeeded(stack, image);
-        if (!imageHasVisiblePixels(image) || missingTextureRatio(image) >= 0.5D) {
+        if (!imageHasVisiblePixels(image) || isMissingTexture(image)) {
             ICONS_BY_STACK_KEY.put(key, "");
             return MaterializedIconResult.SKIPPED;
         }
@@ -474,7 +474,7 @@ public final class ClientItemStackIconRenderer {
     private static boolean isUsableCachedIcon(File file) {
         try {
             BufferedImage image = ImageIO.read(file);
-            return image != null && imageHasVisiblePixels(image) && missingTextureRatio(image) < 0.5D;
+            return image != null && imageHasVisiblePixels(image) && !isMissingTexture(image);
         } catch (Throwable ignored) {
             return false;
         }
@@ -506,28 +506,33 @@ public final class ClientItemStackIconRenderer {
         return false;
     }
 
-    private static double missingTextureRatio(BufferedImage image) {
-        int visiblePixels = 0;
-        int missingTexturePixels = 0;
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                int value = image.getRGB(x, y);
-                int alpha = (value >>> 24) & 255;
-                if (alpha == 0) {
-                    continue;
-                }
+    private static boolean isMissingTexture(BufferedImage image) {
+        int[] argb = image.getRGB(0, 0, image.getWidth(), image.getHeight(), null, 0, image.getWidth());
+        return looksLikeMissingTexture(argb);
+    }
 
-                visiblePixels++;
-                int red = (value >> 16) & 255;
-                int green = (value >> 8) & 255;
-                int blue = value & 255;
-                if (red >= 220 && green <= 40 && blue >= 220) {
-                    missingTexturePixels++;
-                }
+    /**
+     * Whether a render shows Minecraft's missing texture: the magenta (0xF800F8) and black checker
+     * board, so about half magenta and half black. Counting magenta alone also rejected items that
+     * really are magenta (Blood Magic's Purpura incense, Botania's Pixie Dust).
+     */
+    static boolean looksLikeMissingTexture(int[] argb) {
+        int shown = 0, magenta = 0, black = 0;
+        for (int value : argb) {
+            if ((value >>> 24) == 0) {
+                continue;
+            }
+            shown++;
+            int red = (value >> 16) & 255;
+            int green = (value >> 8) & 255;
+            int blue = value & 255;
+            if (red >= 200 && green <= 40 && blue >= 200) {
+                magenta++;
+            } else if (red <= 24 && green <= 24 && blue <= 24) {
+                black++;
             }
         }
-
-        return visiblePixels > 0 ? (double) missingTexturePixels / (double) visiblePixels : 0.0D;
+        return shown > 0 && magenta * 4 >= shown && black * 4 >= shown && (magenta + black) * 10 >= shown * 9;
     }
 
     private static void applyMissingItemTint(ItemStack stack, BufferedImage image) {

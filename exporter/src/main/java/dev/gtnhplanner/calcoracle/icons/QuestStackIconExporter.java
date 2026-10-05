@@ -476,14 +476,10 @@ public final class QuestStackIconExporter {
     }
 
     private static boolean visible(int[] px) {
-        int shown = 0, missing = 0;
         for (int p : px) {
-            if ((p >>> 24) == 0) continue;
-            shown++;
-            int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
-            if (r >= 220 && g <= 40 && b >= 220) missing++;
+            if ((p >>> 24) != 0) return !ClientItemStackIconRenderer.looksLikeMissingTexture(px);
         }
-        return shown > 0 && missing * 2 < shown;
+        return false;
     }
 
     private static void writeStrip(File file, List<int[]> layers) throws Exception {
