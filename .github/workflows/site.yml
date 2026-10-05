@@ -121,10 +121,9 @@ jobs:
           mkdir -p ../game-data
           if gh release download game-data -R "$GITHUB_REPOSITORY" -D ../game-data \
               -p export.json.gz -p icons-full.tar.gz -p daily-tag.txt; then
-            gunzip ../game-data/export.json.gz
             tar -xzf ../game-data/icons-full.tar.gz -C ../game-data icons
             DAILY_TAG=$(cat ../game-data/daily-tag.txt) npm run data:items -- \
-              ../game-data/export.json ../game-data/icons public/data/questbook.json
+              ../game-data/export.json.gz ../game-data/icons public/data/questbook.json
           else
             echo "::warning title=No game data::The game-data release does not exist yet; items show placeholders."
           fi

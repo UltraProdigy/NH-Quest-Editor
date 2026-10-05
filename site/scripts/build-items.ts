@@ -1,7 +1,7 @@
 // Builds public/data/items.json, names.json and the icon files the questbook needs, from the
 // game-data export (exporter/, format dev.gtnhplanner.oracle.v1).
 //
-// Usage: node --max-old-space-size=8192 scripts/build-items.ts <export.json> <icons dir> <questbook.json> [out dir]
+// Usage: node scripts/build-items.ts <export.json[.gz]> <icons dir> <questbook.json> [out dir]
 // Optional env: DAILY_TAG (recorded as the data source).
 //
 // <icons dir>/quest/manifest.json, when present, has icons rendered from the exact stacks the quests
@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
+import { parseJsonFile } from './jsonStream.ts';
 import type { QuestbookData, ItemIndex, ItemInfo, ItemRef } from '../src/lib/model.ts';
 
 const [, , exportArg, iconsArg, questsArg, outArg] = process.argv;
@@ -34,13 +35,15 @@ interface Resource {
   nbt?: string;
 }
 
-console.time('read export');
-const exp = JSON.parse(readFileSync(resolve(exportArg), 'utf8')) as {
-  generatedAt: string;
-  domains: { id: string; entries?: Record<string, Resource[]>; mobs?: { entityName: string; displayName: string }[] }[];
-};
-console.timeEnd('read export');
-const book = JSON.parse(readFileSync(resolve(questsArg), 'utf8')) as QuestbookData;
+// The export is read as a stream (it is several hundred MB, near V8's string limit). Only the
+// root's own members, the ore dictionary and the mob list are kept; every other
+// object is looked at for item and fluid resources as it closes and then dropped.
+interface Domain {
+  id: string;
+  entries?: Record<string, Resource[]>;
+  mobs?: { entityName: string; displayName: string }[];
+}
+const domains: Domain[] = [];
 
 // ---------------------------------------------------------------- collect every resource
 
@@ -48,6 +51,22 @@ const items = new Map<string, ItemInfo & { nbt: boolean }>();
 const keyOf = (r: Resource) =>
   r.kind === 'fluid' ? `fluid:${r.id}` : `${r.registryId ?? r.id.replace(/@\d+$/, '')}@${r.meta ?? 0}`;
 
+function resource(o: Record<string, unknown>) {
+  if ((o.kind !== 'item' && o.kind !== 'fluid') || typeof o.id !== 'string') return;
+  const r = o as unknown as Resource;
+  const key = keyOf(r);
+  const prev = items.get(key);
+  const hasNbt = !!r.nbt;
+  // Prefer the plain (no NBT) stack: its name and icon are the item's defaults.
+  if (!prev || (prev.nbt && !hasNbt) || (!prev.i && r.icon)) {
+    items.set(key, {
+      n: r.displayName ?? key,
+      ...(r.icon ? { i: r.icon } : {}),
+      ...(r.modId ? { m: r.modId } : {}),
+      nbt: hasNbt,
+    });
+  }
+}
 function visit(v: unknown) {
   if (Array.isArray(v)) {
     for (const x of v) visit(x);
@@ -55,29 +74,31 @@ function visit(v: unknown) {
   }
   if (!v || typeof v !== 'object') return;
   const o = v as Record<string, unknown>;
-  if ((o.kind === 'item' || o.kind === 'fluid') && typeof o.id === 'string') {
-    const r = o as unknown as Resource;
-    const key = keyOf(r);
-    const prev = items.get(key);
-    const hasNbt = !!r.nbt;
-    // Prefer the plain (no NBT) stack: its name and icon are the item's defaults.
-    if (!prev || (prev.nbt && !hasNbt) || (!prev.i && r.icon)) {
-      items.set(key, {
-        n: r.displayName ?? key,
-        ...(r.icon ? { i: r.icon } : {}),
-        ...(r.modId ? { m: r.modId } : {}),
-        nbt: hasNbt,
-      });
-    }
-  }
+  resource(o);
   for (const k in o) {
     const x = o[k];
     if (x && typeof x === 'object') visit(x);
   }
 }
-console.time('walk');
-visit(exp.domains);
-console.timeEnd('walk');
+
+console.time('read export');
+await parseJsonFile(resolve(exportArg), {
+  mode(path, parent) {
+    if (path.length === 3 && path[0] === 'domains') {
+      const id = (parent as Record<string, unknown>).id;
+      if ((id === 'oreDictionary' && path[2] === 'entries') || (id === 'mobDrops' && path[2] === 'mobs')) return 'keep';
+    }
+    return 'scan';
+  },
+  onScan(path, v) {
+    if (path.length === 2 && path[0] === 'domains') {
+      domains.push(v as unknown as Domain);
+      visit(v); // resources inside the kept parts (ore dictionary members)
+    } else if (!Array.isArray(v)) resource(v);
+  },
+});
+console.timeEnd('read export');
+const book = JSON.parse(readFileSync(resolve(questsArg), 'utf8')) as QuestbookData;
 
 // ---------------------------------------------------------------- icons of the exact quest stacks
 
@@ -115,12 +136,12 @@ for (const [key, q] of Object.entries(questIcons)) {
   items.set(key, info);
 }
 
-const oreDomain = exp.domains.find((d) => d.id === 'oreDictionary');
+const oreDomain = domains.find((d) => d.id === 'oreDictionary');
 const oreAll = new Map<string, string[]>();
 for (const [name, list] of Object.entries(oreDomain?.entries ?? {})) oreAll.set(name, list.map(keyOf));
 
 const entities: Record<string, string> = {};
-for (const m of exp.domains.find((d) => d.id === 'mobDrops')?.mobs ?? []) entities[m.entityName] = m.displayName;
+for (const m of domains.find((d) => d.id === 'mobDrops')?.mobs ?? []) entities[m.entityName] = m.displayName;
 
 // ---------------------------------------------------------------- what the questbook needs
 
