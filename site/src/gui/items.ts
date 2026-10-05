@@ -97,9 +97,9 @@ export function itemTooltip(ref: ItemRef | string, advanced = false): string[] {
   return lines;
 }
 
+/** PanelFluidSlot's tooltip: the fluid's name and amount. */
 export function fluidTooltip(f: FluidRef): string[] {
-  const info = lookup(fluidKey(f.fluid));
-  return [info?.n ?? f.fluid, `§7${f.n} mB`, ...(info?.m ? [`§9§o${modName(info.m)}`] : [])];
+  return [lookup(fluidKey(f.fluid))?.n ?? f.fluid, `§7${f.n}mB`];
 }
 
 // ---------------------------------------------------------------- drawing
