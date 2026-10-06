@@ -5,7 +5,7 @@ import {
   contains, mouseButtons,
 } from './core.ts';
 import { type GuiColor, WHITE } from './color.ts';
-import { animating } from './frame.ts';
+import { animating, redraw } from './frame.ts';
 import { type GuiTexture, type GuiLine, tex, col, ColorTexture, LayeredTexture } from './theme.ts';
 import { drawString, stringWidth, FONT_HEIGHT } from './font.ts';
 import { splitString, processTags, type LinkRange } from './text.ts';
@@ -243,8 +243,35 @@ export const itemLookup = {
   open: (_key: string, _mode: 'recipe' | 'usage'): void => {},
 };
 
+/**
+ * NEI's R (recipes) and U (usages) keys while the mouse is over a panel showing `key()`
+ * (PanelInteractiveItemSlot.onKeyTyped passes the stack to NEI's ShortcutInputHandler).
+ */
+export function lookupOnKey(panel: Panel, key: () => string | null) {
+  // Hovered in the frame drawn last; panels scrolled out of view are not drawn and so not hovered.
+  let hoveredIn = -1;
+  const draw = panel.draw.bind(panel);
+  panel.draw = (gfx, mx, my) => {
+    if (contains(panel.transform, mx, my)) hoveredIn = redraw.frame;
+    draw(gfx, mx, my);
+  };
+  const onKey = panel.key.bind(panel);
+  panel.key = (e) => {
+    const k = e.key.toLowerCase();
+    if (hoveredIn === redraw.frame && (k === 'r' || k === 'u') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const item = key();
+      if (item) {
+        itemLookup.open(item, k === 'r' ? 'recipe' : 'usage');
+        return true;
+      }
+    }
+    return onKey(e);
+  };
+}
+
 /** Left click: recipes, right click: usages (NEI's R and U), for a slot showing `key()`. */
 function lookupOnClick(panel: PanelButton, key: () => string | null) {
+  lookupOnKey(panel, key);
   let pressed = -1;
   panel.mouseDown = (mx, my, b) => {
     const hit = contains(panel.transform, mx, my);
@@ -794,6 +821,14 @@ export class CanvasScrolling extends BasePanel {
         this.scrollY.write(cs + dy);
         this.updatePanelScroll();
       }
+    }
+    return false;
+  }
+
+  key(e: KeyboardEvent) {
+    for (let i = this.children.length - 1; i >= 0; i--) {
+      const c = this.children[i];
+      if (c.enabled && c.key(e)) return true;
     }
     return false;
   }

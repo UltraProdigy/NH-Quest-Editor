@@ -480,6 +480,7 @@ export class Host {
   }
 
   private frame() {
+    redraw.frame++;
     if (this.dirty || this.deviceSize() !== this.lastSize) this.relayout();
     const gfx = this.gfx;
     const g = gfx.g;

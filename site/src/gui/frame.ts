@@ -11,6 +11,8 @@ export const redraw = {
   smooth: false,
   /** Installed by the screen host. */
   request: () => {},
+  /** Number of the frame drawn last (counts up). */
+  frame: 0,
 };
 
 /** Mark the frame being drawn as animated, so another one follows (at the display rate if smooth). */

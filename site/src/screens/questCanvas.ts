@@ -3,7 +3,8 @@
 import { type Gfx, Rect, contains, keys, type Tooltip, type Panel } from '../gui/core.ts';
 import { type GuiColor, pulseColor, staticColor } from '../gui/color.ts';
 import { tex, col, line as themeLine, icon, ImageTexture, type GuiTexture } from '../gui/theme.ts';
-import { PanelButton, CanvasScrolling, PanelLine, PanelGeneric, itemTexture } from '../gui/widgets.ts';
+import { PanelButton, CanvasScrolling, PanelLine, PanelGeneric, itemTexture, lookupOnKey } from '../gui/widgets.ts';
+import { currentVariant } from '../gui/items.ts';
 import { tr } from '../gui/lang.ts';
 import { quest as getQuest, prop, questState, type QuestState } from '../store.ts';
 import type { Quest, QuestLine } from '../lib/model.ts';
@@ -55,6 +56,8 @@ export class PanelButtonQuest extends PanelButton {
     if (q?.icon) this.setIcon(itemTexture(q.icon), null, 4);
     else this.setIcon(null);
     this.active = true;
+    // R and U over a quest look up its icon in NEI (clicking opens the quest).
+    lookupOnKey(this, () => (q?.icon ? currentVariant(q.icon) : null));
   }
 
   draw(gfx: Gfx, mx: number, my: number) {
