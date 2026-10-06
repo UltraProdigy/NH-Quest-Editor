@@ -97,7 +97,101 @@ public final class NeiHandlerExporter {
         }
         out.put("recipeAssociations", associations("NEI_RECIPE_ASSOCIATIONS"));
         out.put("usageAssociations", associations("NEI_USAGE_ASSOCIATIONS"));
+        try {
+            out.put("componentFamiliar", componentFamiliar());
+        } catch (Throwable t) {
+            warn("gtLookup GT++ components: " + t);
+        }
+        try {
+            out.put("dataSticks", dataSticks());
+        } catch (Throwable t) {
+            warn("gtLookup data sticks: " + t);
+        }
+        try {
+            fluidDisplay(out);
+        } catch (Throwable t) {
+            warn("gtLookup fluid display: " + t);
+        }
         return out;
+    }
+
+    /**
+     * GT++ components (BaseItemComponent): the same material's items of the familiar prefixes, which
+     * GTNEIDefaultHandler adds for "R" on them.
+     */
+    private Map<String, Object> componentFamiliar() throws Exception {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        Class<?> component = Class.forName("gtPlusPlus.core.item.base.BaseItemComponent");
+        for (Object item : Item.itemRegistry) {
+            if (!component.isInstance(item)) {
+                continue;
+            }
+            Object prefix = call(field(item, "componentType"), "getGtOrePrefix");
+            Object material = field(item, "componentMaterial");
+            if (prefix == null || material == null) {
+                continue;
+            }
+            List<Object> familiar = new ArrayList<Object>();
+            for (Object p : iterable(field(prefix, "mFamiliarPrefixes"))) {
+                String k = key(asStack(call(material, "getComponentByPrefix", p, Integer.valueOf(1))));
+                if (k != null) {
+                    familiar.add(k);
+                }
+            }
+            String self = key(new ItemStack((Item) item, 1, 0));
+            if (self != null && !familiar.isEmpty()) {
+                out.put(self, familiar);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The data sticks GT shows with assembly line recipes (RecipeAssemblyLine.dataSticksForNEI):
+     * [stick, its NBT as the export writes it, the recipe's output]. NEI looks up the output for them.
+     */
+    private List<Object> dataSticks() throws Exception {
+        List<Object> out = new ArrayList<Object>();
+        Object recipes = staticField("gregtech.api.util.GTRecipe$RecipeAssemblyLine", "sAssemblylineRecipes");
+        for (Object recipe : iterable(recipes)) {
+            String output = key(asStack(field(recipe, "mOutput")));
+            if (output == null) {
+                continue;
+            }
+            for (Object s : iterable(field(recipe, "dataSticksForNEI"))) {
+                ItemStack stick = asStack(s);
+                String k = key(stick);
+                if (k == null || stick.stackTagCompound == null) {
+                    continue;
+                }
+                List<Object> row = new ArrayList<Object>();
+                row.add(k);
+                row.add(stick.stackTagCompound.toString());
+                row.add(output);
+                out.add(row);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * GT's fluid display item (its damage is the fluid id) and Forge's fluid ids, so the build can
+     * tell which fluid a display stack stands for (StackInfo.getFluid).
+     */
+    private void fluidDisplay(Map<String, Object> out) throws Exception {
+        Object display = Class.forName("gregtech.api.enums.ItemList").getField("Display_Fluid").get(null);
+        Object item = call(display, "getItem");
+        if (item instanceof Item) {
+            out.put("fluidDisplay", String.valueOf(Item.itemRegistry.getNameForObject(item)));
+        }
+        Object ids = callStatic("net.minecraftforge.fluids.FluidRegistry", "getRegisteredFluidIDs");
+        if (ids instanceof Map) {
+            Map<String, Object> fluids = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> e : ((Map<?, ?>) ids).entrySet()) {
+                fluids.put(String.valueOf(e.getKey()), e.getValue());
+            }
+            out.put("fluidIds", fluids);
+        }
     }
 
     /**

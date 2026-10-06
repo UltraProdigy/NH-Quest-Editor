@@ -2734,7 +2734,13 @@ public final class GtnhCalcOracleExporter {
         List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
         for (Object value : iterable(specialItems)) {
             if (value instanceof ItemStack) {
-                Map<String, Object> item = itemStack((ItemStack) value);
+                // Zero-sized stacks are shown too: the assembly line's data stick is one.
+                ItemStack stack = (ItemStack) value;
+                if (stack.stackSize <= 0) {
+                    stack = stack.copy();
+                    stack.stackSize = 1;
+                }
+                Map<String, Object> item = itemStack(stack);
                 if (item != null) {
                     item.put("consumed", Boolean.FALSE);
                     items.add(item);
