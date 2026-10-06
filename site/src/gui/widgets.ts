@@ -2,15 +2,22 @@
 
 import {
   BasePanel, CanvasEmpty, type Gfx, type GuiRect, type Panel, type Tooltip, Rect, RectLerp, Transform, Align,
-  contains, mouseButtons,
+  contains, mouseButtons, keys,
 } from './core.ts';
 import { type GuiColor, WHITE } from './color.ts';
 import { animating, redraw } from './frame.ts';
 import { type GuiTexture, type GuiLine, tex, col, ColorTexture, LayeredTexture } from './theme.ts';
 import { drawString, stringWidth, FONT_HEIGHT } from './font.ts';
 import { splitString, processTags, type LinkRange } from './text.ts';
-import { drawItemFit, itemTooltip, currentVariant, drawFluid, fluidTooltip } from './items.ts';
+import { drawItemFit, itemTooltip, currentVariant, drawFluid, fluidTooltip, variants } from './items.ts';
 import type { ItemRef, FluidRef } from '../lib/model.ts';
+import { tr } from './lang.ts';
+
+/** A single item stack for an item key ("registryId@meta" or "...#nbtHash"). */
+const refOfKey = (key: string): ItemRef => {
+  const m = /^(.*)@(\d+)(#.*)?$/.exec(key);
+  return m ? { id: m[1], dmg: Number(m[2]), n: 1, ...(m[3] ? { k: key } : {}) } : { id: key, dmg: 0, n: 1 };
+};
 
 /** Text width correction from the BQ config (GTNH: 1.0). */
 export const TEXT_WIDTH_CORRECTION = 1.0;
@@ -241,6 +248,8 @@ export const fluidTexture = (f: FluidRef): GuiTexture => ({
  */
 export const itemLookup = {
   open: (_key: string, _mode: 'recipe' | 'usage'): void => {},
+  /** Show the items an ore dictionary slot accepts (PopItemList). Installed by main.ts. */
+  variants: (_title: string, _stacks: ItemRef[]): void => {},
 };
 
 /**
@@ -269,8 +278,11 @@ export function lookupOnKey(panel: Panel, key: () => string | null) {
   };
 }
 
-/** Left click: recipes, right click: usages (NEI's R and U), for a slot showing `key()`. */
-function lookupOnClick(panel: PanelButton, key: () => string | null) {
+/**
+ * Left click: recipes, right click: usages (NEI's R and U), for a slot showing `key()`. With
+ * `shiftClick`, a click with Shift held does that instead (PanelInteractiveItemSlot.onMouseClick).
+ */
+function lookupOnClick(panel: PanelButton, key: () => string | null, shiftClick?: () => void) {
   lookupOnKey(panel, key);
   let pressed = -1;
   panel.mouseDown = (mx, my, b) => {
@@ -281,17 +293,33 @@ function lookupOnClick(panel: PanelButton, key: () => string | null) {
   panel.mouseUp = (mx, my, b) => {
     if (pressed !== b) return false;
     pressed = -1;
+    if (shiftClick && keys.shift && contains(panel.transform, mx, my)) {
+      shiftClick();
+      return true;
+    }
     const k = contains(panel.transform, mx, my) ? key() : null;
     if (k) itemLookup.open(k, b === 0 ? 'recipe' : 'usage');
     return !!k;
   };
 }
 
-/** An item in a slot frame with its tooltip (PanelItemSlot). */
+/**
+ * An item in a slot frame with its tooltip (PanelItemSlot). With popupVariants (item tasks with an
+ * ore dictionary name), Shift + click lists the items it accepts.
+ */
 export class PanelItemSlot extends PanelButton {
-  constructor(t: GuiRect, public stack: ItemRef | null, opts: { showCount?: boolean; onClick?: (b: PanelButton) => void } = {}) {
+  private popupVariants: boolean;
+  constructor(
+    t: GuiRect,
+    public stack: ItemRef | null,
+    opts: { showCount?: boolean; onClick?: (b: PanelButton) => void; popupVariants?: boolean } = {},
+  ) {
     super(t, { onClick: opts.onClick });
-    if (!opts.onClick) lookupOnClick(this, () => (this.stack ? currentVariant(this.stack) : null));
+    this.popupVariants = !!opts.popupVariants && !!stack;
+    const popup = this.popupVariants
+      ? () => itemLookup.variants(tr('betterquesting.title.valid_items'), variants(this.stack!).map(refOfKey))
+      : undefined;
+    if (!opts.onClick) lookupOnClick(this, () => (this.stack ? currentVariant(this.stack) : null), popup);
     const frame = tex('item_frame');
     this.textures = [
       frame,
@@ -302,7 +330,9 @@ export class PanelItemSlot extends PanelButton {
   }
   tooltip(mx: number, my: number): Tooltip {
     if (!this.stack || !contains(this.transform, mx, my)) return null;
-    return itemTooltip(currentVariant(this.stack));
+    const lines = itemTooltip(currentVariant(this.stack));
+    if (this.popupVariants) lines.push('§7§o' + tr('betterquesting.tooltip.popup_valid_items'));
+    return lines;
   }
 }
 

@@ -20,8 +20,9 @@ const yesNo = (v: unknown) => (v ? RED + tr('gui.yes') : GREEN + tr('gui.no'));
 
 const items = (t: TaskData, key: string) => (Array.isArray(t[key]) ? (t[key] as ItemRef[]) : []);
 
+/** PanelTaskItemBase's slots: Shift + click lists the items of an ore dictionary entry. */
 function itemSlot(rect: GuiRect, stack: ItemRef) {
-  return new PanelItemSlot(rect, stack);
+  return new PanelItemSlot(rect, stack, { popupVariants: !!stack.ore });
 }
 
 /** PanelTaskItemBase: a slot and "name (oredict) / 0/n / INCOMPLETE" per item. */

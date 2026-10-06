@@ -6,6 +6,7 @@ import { registerThemes, setTheme, setShowDependencyArrows, type ThemeJson } fro
 import { loadItems } from './gui/items.ts';
 import { fetchJson, resourceUrl, siteUrl } from './gui/assets.ts';
 import { textLinks, itemLookup } from './gui/widgets.ts';
+import { PopItemList } from './gui/popup.ts';
 import { openLookup, RecipeScreen, type RecipeMode } from './nei/recipeScreen.ts';
 import { splitString, plainText, setForceMonochrome } from './gui/text.ts';
 import { loadQuestbook, quest as getQuest, fullId, linesContaining, view, questNbtFluid, type QuestState } from './store.ts';
@@ -81,9 +82,13 @@ async function start() {
   };
 
   // NEI: left click on an item shows its recipes, right click its uses.
-  itemLookup.open = (key, mode) => {
   nbtFluidOf.get = questNbtFluid;
+  itemLookup.open = (key, mode) => {
     if (host.screen) void openLookup(host.screen, key, mode);
+  };
+  itemLookup.variants = (title, stacks) => {
+    const s = host.screen;
+    if (s) s.openPopup(new PopItemList(title, stacks, () => s.closePopup()));
   };
 
   // Links inside quest descriptions.

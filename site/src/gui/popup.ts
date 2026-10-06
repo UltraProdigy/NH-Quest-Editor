@@ -1,8 +1,12 @@
-// Pop-up context menu (betterquesting.api2.client.gui.popups.PopContextMenu).
+// Pop-ups: the context menu (betterquesting.api2.client.gui.popups.PopContextMenu) and the item
+// list (PopItemList).
 
 import { CanvasEmpty, Rect, Transform, Align, contains, RectLerp, type Gfx, type Panel } from './core.ts';
 import { tex } from './theme.ts';
-import { PanelButton, CanvasScrolling, PanelVScrollBar, PanelGeneric } from './widgets.ts';
+import { PanelButton, CanvasScrolling, PanelVScrollBar, PanelGeneric, CanvasTextured, PanelTextBox, PanelItemSlot } from './widgets.ts';
+import { ColorTexture, col } from './theme.ts';
+import { staticColor } from './color.ts';
+import type { ItemRef } from '../lib/model.ts';
 import type { GuiTexture } from './theme.ts';
 
 interface Entry {
@@ -84,5 +88,49 @@ export class PopContextMenu extends CanvasEmpty {
       return true;
     }
     return used;
+  }
+}
+
+/**
+ * PopItemList: a dimmed screen with a panel of 32 px item slots (as many across as fit in half
+ * the screen, scrolling past five and a half rows), a title and a Close button below.
+ */
+export class PopItemList extends CanvasEmpty {
+  constructor(private message: string, private list: ItemRef[], private close: () => void) {
+    super(new Transform(Align.FULL_BOX, [0, 0, 0, 0]));
+  }
+
+  init() {
+    this.children = [];
+    const W = this.transform.w(), H = this.transform.h();
+    const n = this.list.length;
+    this.add(new PanelGeneric(new Transform(Align.FULL_BOX, [0, 0, 0, 0], 1), new ColorTexture(staticColor(0x80000000))));
+    const perRow = Math.max(1, Math.min(Math.trunc((W * 0.5) / 36), n));
+    const rows = Math.ceil(n / perRow);
+    const popH = Math.trunc(Math.min(rows, 5.5) * 36) + 32;
+    const popW = Math.max(perRow, 3) * 36 + 20;
+    const fw = popW / W, fh = popH / H;
+    const box = this.add(
+      new CanvasTextured(new Transform([(1 - fw) / 2, (1 - fh) / 2, 1 - (1 - fw) / 2, 1 - (1 - fh) / 2], [0, 0, 0, 0]), tex('panel_main')),
+    );
+    const cw = box.transform.w(), ch = box.transform.h();
+    box.add(new PanelTextBox(new Transform(Align.FULL_BOX, [8, 8, 8, 8]), this.message).setAlignment(1).setColor(col('text_main')));
+    const sw = (Math.min(n, perRow) * 36) / cw;
+    const scroll = box.add(new CanvasScrolling(new Transform([(1 - sw) / 2, 20 / ch, 1 - (1 - sw) / 2, 0.95], [0, 0, 0, 0])));
+    const slots: Panel[] = [];
+    const scrollW = scroll.transform.w();
+    this.list.forEach((stack, i) => {
+      const inRow = Math.min(n - Math.trunc(i / perRow) * perRow, perRow);
+      const xOff = Math.trunc(scrollW / 2) - Math.trunc((inRow * 36) / 2);
+      slots.push(new PanelItemSlot(new Rect((i % perRow) * 36 + xOff, Math.trunc(i / perRow) * 36, 32, 32, 10), stack));
+    });
+    scroll.addAll(slots);
+    const bottom = 1 - (1 - fh) / 2;
+    this.add(
+      new PanelButton(Transform.at([0.5, bottom, 0.5, bottom], -Math.trunc(popW / 2), 3, popW, 16), {
+        text: 'Close',
+        onClick: () => this.close(),
+      }),
+    );
   }
 }
