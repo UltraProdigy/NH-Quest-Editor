@@ -1,7 +1,7 @@
 // Screens (GuiScreenCanvas) and the host that runs them on a <canvas>: GUI scale, input,
 // tooltips and redraw scheduling.
 
-import { CanvasEmpty, Gfx, Rect, Transform, Align, mouseButtons, keys, type Tooltip, type Panel } from './core.ts';
+import { CanvasEmpty, Gfx, Rect, Transform, Align, mouseButtons, keys, type Tooltip, type TipLine, type Panel } from './core.ts';
 import { drawString, stringWidth, FONT_HEIGHT } from './font.ts';
 import { splitString } from './text.ts';
 import { redraw } from './frame.ts';
@@ -107,11 +107,17 @@ export abstract class Screen {
 
 // ---------------------------------------------------------------- tooltips
 
-/** Forge's GuiUtils.drawHoveringText as BQ uses it (RenderUtils.drawHoveringText). */
-export function drawHoveringText(gfx: Gfx, lines: string[], mx: number, my: number, sw: number, sh: number, maxW = -1) {
+/**
+ * Forge's GuiUtils.drawHoveringText as BQ uses it (RenderUtils.drawHoveringText). Lines may also be
+ * drawn by code (TipLine), each as tall as it says, as NEI's tooltips allow.
+ */
+export function drawHoveringText(
+  gfx: Gfx, lines: (string | TipLine)[], mx: number, my: number, sw: number, sh: number, maxW = -1,
+) {
   if (!lines.length) return;
+  const widthOf = (l: string | TipLine) => (typeof l === 'string' ? stringWidth(l) : l.width);
   let tw = 0;
-  for (const l of lines) tw = Math.max(tw, stringWidth(l));
+  for (const l of lines) tw = Math.max(tw, widthOf(l));
   let wrap = false;
   let titleLines = 1;
   let tx = mx + 12;
@@ -128,12 +134,12 @@ export function drawHoveringText(gfx: Gfx, lines: string[], mx: number, my: numb
   }
   if (wrap) {
     let ww = 0;
-    const out: string[] = [];
+    const out: (string | TipLine)[] = [];
     lines.forEach((l, i) => {
-      const w = splitString(l, tw, true);
+      const w = typeof l === 'string' ? splitString(l, tw, true) : [l];
       if (i === 0) titleLines = w.length;
       for (const x of w) {
-        ww = Math.max(ww, stringWidth(x));
+        ww = Math.max(ww, widthOf(x));
         out.push(x);
       }
     });
@@ -142,11 +148,9 @@ export function drawHoveringText(gfx: Gfx, lines: string[], mx: number, my: numb
     tx = mx > sw / 2 ? mx - 16 - tw : mx + 12;
   }
   let ty = my - 12;
-  let th = 8;
-  if (lines.length > 1) {
-    th += (lines.length - 1) * 10;
-    if (lines.length > titleLines) th += 2;
-  }
+  let th = -2;
+  for (const l of lines) th += typeof l === 'string' ? 10 : l.height;
+  if (lines.length > titleLines) th += 2;
   if (ty < 4) ty = 4;
   else if (ty + th + 4 > sh) ty = sh - th - 4;
 
@@ -163,9 +167,14 @@ export function drawHoveringText(gfx: Gfx, lines: string[], mx: number, my: numb
   r(tx - 3, ty - 3, tx + tw + 3, ty - 3 + 1, b0, b0);
   r(tx - 3, ty + th + 2, tx + tw + 3, ty + th + 3, b1, b1);
   lines.forEach((l, i) => {
-    drawString(gfx, l, tx, ty, 0xffffffff, true);
+    if (typeof l === 'string') {
+      drawString(gfx, l, tx, ty, 0xffffffff, true);
+      ty += 10;
+    } else {
+      l.draw(gfx, tx, ty);
+      ty += l.height;
+    }
     if (i + 1 === titleLines) ty += 2;
-    ty += 10;
   });
 }
 

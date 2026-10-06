@@ -10,7 +10,7 @@
 // - tabs above the window, catalysts to its left.
 
 import { Screen } from '../gui/screen.ts';
-import { type Gfx, type Tooltip, keys as heldKeys } from '../gui/core.ts';
+import { type Gfx, type Tooltip, type TipLine, keys as heldKeys } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import {
@@ -493,9 +493,10 @@ export class RecipeScreen extends Screen {
         if (o?.nc) lines.push('§7Does not get consumed in the process');
         else if (o?.c !== undefined) lines.push(`§7${hit.ps.input ? 'Consume' : 'Output'} Chance: ${formatChance(o.c)}`);
       }
-      const alts = hit.ps ? slotItems(hit.ps.slot).length : 0;
-      if (alts > 1) lines.push(`§8Cycles through ${alts} items`);
-      return lines;
+      const alts = hit.ps ? slotItems(hit.ps.slot) : [];
+      const accepts: (string | TipLine)[] = lines;
+      if (new Set(alts).size > 1) accepts.push(acceptsFollowing(alts, hit.item));
+      return accepts;
     }
     for (const { i, r } of this.tabs()) {
       if (inside(r, mx, my)) {
@@ -507,6 +508,46 @@ export class RecipeScreen extends Screen {
     if (inside(this.searchButton(), mx, my)) return ['Recipe search', '§7Only in game'];
     return null;
   }
+}
+
+/**
+ * NEI's "Accepts following" tooltip line (AcceptsFollowingTooltipLineHandler, an
+ * ItemsTooltipLineHandler grid): every item a cycling slot takes, at most 11 across and 4 rows,
+ * the one shown now highlighted, and "+n" for the ones that do not fit.
+ */
+export function acceptsFollowing(list: number[], active: number): TipLine {
+  const SLOT = 18, MAX_COLUMNS = 11, MAX_ROWS = 4, LABEL_MARGIN = 15, MARGIN_TOP = 2;
+  const label = 'Accepts following';
+  const items = [...new Set(list)];
+  const len = items.length;
+  const cols = Math.min(MAX_COLUMNS, len);
+  const rows = Math.min(MAX_ROWS, Math.ceil(len / cols));
+  let count = Math.min(len, cols * rows);
+  if (count < len) count -= Math.ceil((stringWidth(`+${len - count}`) - 2) / SLOT);
+  const width = Math.max(cols * SLOT, stringWidth(label) + LABEL_MARGIN);
+  const activeIndex = items.indexOf(active);
+  // gridIndexShift: scroll the grid so the shown item stays in view.
+  const shift = activeIndex < 0 ? 0 : Math.max(0, Math.min(len - count, activeIndex - count + 2));
+  return {
+    width,
+    height: rows * SLOT + 9 + 2 + MARGIN_TOP,
+    draw(gfx, x, y) {
+      y += MARGIN_TOP;
+      drawString(gfx, `§7${label}:`, x, y, 0xffffffff, true);
+      const gy = y + 9 + 2;
+      for (let n = 0; n < count; n++) {
+        const i = shift + n;
+        const sx = x + (n % cols) * SLOT, sy = gy + Math.floor(n / cols) * SLOT;
+        if (i === activeIndex) gfx.fill(sx, sy, SLOT, SLOT, 0x66555555);
+        drawNeiItem(gfx, items[i], sx + 1, sy + 1);
+      }
+      const hidden = len - count;
+      if (hidden > 0) {
+        const t = `+${hidden}`;
+        drawString(gfx, `§7${t}`, x + width - stringWidth(t) - 2, gy + (rows - 1) * SLOT + 1 + Math.round((16 - 9) / 2), 0xffffffff, true);
+      }
+    },
+  };
 }
 
 const handlerMod = (h: NeiHandler) => (h.kind === 'gt' ? 'GregTech' : 'Minecraft');

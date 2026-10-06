@@ -299,7 +299,14 @@ export class RectLerp implements GuiRect {
 
 // ---------------------------------------------------------------- panels
 
-export type Tooltip = string[] | null;
+/** A tooltip line drawn by code instead of text (CodeChickenLib's ITooltipLineHandler). */
+export interface TipLine {
+  width: number;
+  height: number;
+  draw(gfx: Gfx, x: number, y: number): void;
+}
+
+export type Tooltip = (string | TipLine)[] | null;
 
 /** Mouse buttons currently held (Mouse.isButtonDown). Updated by the screen host. */
 export const mouseButtons = [false, false, false];
