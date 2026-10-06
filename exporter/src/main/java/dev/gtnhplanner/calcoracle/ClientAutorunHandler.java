@@ -11,7 +11,12 @@ public final class ClientAutorunHandler {
 
     @SubscribeEvent
     public void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || started) {
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
+        // Work the export thread hands to the client thread (anything touching OpenGL).
+        ClientThread.runPending();
+        if (started) {
             return;
         }
 

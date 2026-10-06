@@ -396,6 +396,13 @@ jobs:
             tail -n 120 "$log" | cut -c1-400 > "$WORK/diag-tail.txt"
             annotate "client log tail" "$WORK/diag-tail.txt" 20000
           fi
+          # A JVM that dies natively (exit 134, SIGSEGV) leaves an hs_err file instead of a crash report.
+          hserr=$(find "$WORK/client" -maxdepth 2 -name 'hs_err_pid*.log' 2>/dev/null | head -n1 || true)
+          if [ -n "$hserr" ]; then
+            { head -n 40 "$hserr"; echo "..."; grep -n -A 30 '^Java frames' "$hserr" | head -n 40; } | cut -c1-300 > "$WORK/diag-hserr.txt"
+            annotate "JVM fatal error" "$WORK/diag-hserr.txt" 20000
+            cp "$hserr" "$out/" 2>/dev/null || true
+          fi
           crash=$(ls -t "$WORK/client/.minecraft/crash-reports"/*.txt 2>/dev/null | head -n1 || true)
           if [ -n "$crash" ]; then
             head -n 150 "$crash" | cut -c1-400 > "$WORK/diag-crash.txt"

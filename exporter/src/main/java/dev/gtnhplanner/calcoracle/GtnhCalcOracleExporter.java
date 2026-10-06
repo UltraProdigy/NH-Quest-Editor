@@ -297,7 +297,7 @@ public final class GtnhCalcOracleExporter {
             return domain;
         }
         try {
-            dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter exporter = new dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter(
+            final dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter exporter = new dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter(
                 new dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.Resources() {
                     @Override
                     public Map<String, Object> item(ItemStack stack) {
@@ -306,7 +306,17 @@ public final class GtnhCalcOracleExporter {
                 },
                 gtRecipeRefs
             );
-            Map<String, Object> exported = exporter.export();
+            // NEI's handlers draw (and GT's text capture swaps the font renderer), so this runs on
+            // the client thread; the export itself runs on its own thread.
+            Map<String, Object> exported = ClientThread.call(
+                new java.util.concurrent.Callable<Map<String, Object>>() {
+                    @Override
+                    public Map<String, Object> call() {
+                        return exporter.export();
+                    }
+                },
+                20
+            );
             domain.putAll(exported);
             int handlerCount = listFrom(exported.get("handlers")).size();
             adapters.add(
