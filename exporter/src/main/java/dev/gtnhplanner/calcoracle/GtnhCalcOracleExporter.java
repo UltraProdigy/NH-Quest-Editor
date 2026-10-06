@@ -101,6 +101,7 @@ public final class GtnhCalcOracleExporter {
         domains.add(exportGregtech(adapters));
         domains.add(exportCrafting(adapters));
         domains.add(exportSmelting(adapters));
+        domains.add(exportNeiHandlers(adapters));
         domains.add(exportThaumcraft(adapters));
         domains.add(exportForestryBees(adapters));
         domains.add(exportIc2Crops(adapters));
@@ -162,6 +163,9 @@ public final class GtnhCalcOracleExporter {
         adapters.add(adapter("ore-dictionary", "computed", true, entries.size(), stackCount, started, null));
         return domain;
     }
+
+    /** Every exported GT recipe -> [map id, index in the exported map], for the NEI handler export. */
+    private final Map<Object, Object[]> gtRecipeRefs = new IdentityHashMap<Object, Object[]>();
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> exportGregtech(List<Map<String, Object>> adapters) {
@@ -244,10 +248,15 @@ public final class GtnhCalcOracleExporter {
                     attachSlotAlternatives(itemInputs, itemInputSlots, recipe, "mOreDictAlt", false);
                     attachSlotAlternatives(fluidInputs, fluidInputSlots, recipe, "mAltFluidInputs", true);
                     attachUnifiedItemAlternatives(itemInputs, itemInputSlots, recipe.mInputs);
+                    markSlots(itemInputs, itemInputSlots);
+                    markSlots(fluidInputs, fluidInputSlots);
                     exportedRecipe.put("itemInputs", itemInputs);
                     exportedRecipe.put("itemOutputs", outputItemStacks(recipe));
                     exportedRecipe.put("fluidInputs", fluidInputs);
-                    exportedRecipe.put("fluidOutputs", fluidStacks(recipe.mFluidOutputs));
+                    List<Integer> fluidOutputSlots = new ArrayList<Integer>();
+                    List<Map<String, Object>> fluidOutputs = fluidStacks(recipe.mFluidOutputs, fluidOutputSlots);
+                    markSlots(fluidOutputs, fluidOutputSlots);
+                    exportedRecipe.put("fluidOutputs", fluidOutputs);
                     if ("gtpp.recipe.lftr.sparging".equals(map.unlocalizedName)) {
                         putSpargeByproducts(exportedRecipe, recipe);
                     }
@@ -258,6 +267,7 @@ public final class GtnhCalcOracleExporter {
                     exportedRecipe.put("nonConsumedInputs", specialItems(recipe.mSpecialItems));
                     exportedRecipe.put("runtimeCalculation", buildGtRuntimeCalculation(map.unlocalizedName, name, recipe));
                     recipes.add(exportedRecipe);
+                    gtRecipeRefs.put(recipe, new Object[] { safeString(map.unlocalizedName), Integer.valueOf(index) });
                     index++;
                 }
 
@@ -272,6 +282,47 @@ public final class GtnhCalcOracleExporter {
             adapters.add(adapter("gregtech-recipe-maps", "missing", true, 0, recipeCount, started, t.toString()));
         }
 
+        return domain;
+    }
+
+    /**
+     * What NEI shows for each recipe handler (names, tabs, catalysts, GT layouts and the recipes in
+     * NEI's order with their description lines). Needs the client, after the GT export above.
+     */
+    private Map<String, Object> exportNeiHandlers(List<Map<String, Object>> adapters) {
+        long started = System.currentTimeMillis();
+        Map<String, Object> domain = domain("nei");
+        if (!FMLCommonHandler.instance().getSide().isClient() || !isClassPresent("codechicken.nei.recipe.GuiCraftingRecipe")) {
+            adapters.add(adapter("nei-handlers", "not_present", false, 0, 0, started, null));
+            return domain;
+        }
+        try {
+            dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter exporter = new dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter(
+                new dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.Resources() {
+                    @Override
+                    public Map<String, Object> item(ItemStack stack) {
+                        return itemStack(stack);
+                    }
+                },
+                gtRecipeRefs
+            );
+            Map<String, Object> exported = exporter.export();
+            domain.putAll(exported);
+            int handlerCount = listFrom(exported.get("handlers")).size();
+            adapters.add(
+                adapter(
+                    "nei-handlers",
+                    exporter.warnings.isEmpty() ? "computed" : "partial",
+                    true,
+                    handlerCount,
+                    handlerCount,
+                    started,
+                    exporter.warnings.isEmpty() ? null : join(exporter.warnings, "; ")
+                )
+            );
+        } catch (Throwable t) {
+            adapters.add(adapter("nei-handlers", "missing", true, 0, 0, started, t.toString()));
+        }
         return domain;
     }
 
@@ -296,8 +347,13 @@ public final class GtnhCalcOracleExporter {
                 exported.put("id", sha1("crafting:" + index + ":" + raw.getClass().getName() + ":" + stackKey(output)).substring(0, 16));
                 exported.put("className", raw.getClass().getName());
                 exported.put("type", craftingType(raw));
-                exported.put("width", readIntField(raw, "recipeWidth"));
-                exported.put("height", readIntField(raw, "recipeHeight"));
+                // ShapedRecipes keeps its size in recipeWidth/Height, Forge's ShapedOreRecipe in width/height.
+                int width = readIntField(raw, "recipeWidth");
+                int height = readIntField(raw, "recipeHeight");
+                if (width == 0) width = readIntField(raw, "width");
+                if (height == 0) height = readIntField(raw, "height");
+                exported.put("width", Integer.valueOf(width));
+                exported.put("height", Integer.valueOf(height));
                 exported.put("inputs", craftingInputs(raw));
                 exported.put("output", itemStack(output));
                 recipes.add(exported);
@@ -2642,11 +2698,26 @@ public final class GtnhCalcOracleExporter {
                 if (chance > 0 && chance < 10000) {
                     item.put("chance", Double.valueOf(chance / 10000.0D));
                 }
+                if (index != outputs.size()) {
+                    item.put("slot", Integer.valueOf(index));
+                }
                 outputs.add(item);
             }
             index++;
         }
         return outputs;
+    }
+
+    /**
+     * Empty recipe slots are left out of the exported lists; where that moves an entry, it records
+     * the slot it came from ("slot"), because NEI places stacks by slot.
+     */
+    private void markSlots(List<Map<String, Object>> entries, List<Integer> slots) {
+        for (int i = 0; i < entries.size() && i < slots.size(); i++) {
+            if (slots.get(i).intValue() != i) {
+                entries.get(i).put("slot", slots.get(i));
+            }
+        }
     }
 
     private List<Map<String, Object>> specialItems(Object specialItems) {
