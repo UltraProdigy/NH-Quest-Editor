@@ -40,6 +40,7 @@ public final class NeiHandlerExporter {
     /** GT recipe -> [map id, index in the exported map]. */
     private final Map<Object, Object[]> gtRecipeRefs;
     public final List<String> warnings = new ArrayList<String>();
+    private boolean descriptionWarned;
 
     public NeiHandlerExporter(Resources resources, Map<Object, Object[]> gtRecipeRefs) {
         this.resources = resources;
@@ -192,7 +193,12 @@ public final class NeiHandlerExporter {
         List<Object> lines = new ArrayList<Object>();
         TreeSet<Integer> inCounts = new TreeSet<Integer>(), outCounts = new TreeSet<Integer>();
         TreeSet<Integer> fluidInCounts = new TreeSet<Integer>(), fluidOutCounts = new TreeSet<Integer>();
+        // drawDescription(CachedDefaultRecipe) in older GT, (CachedDefaultRecipe, int recipeIndex) in newer.
         Method drawDescription = declaredMethod("gregtech.nei.GTNEIDefaultHandler", "drawDescription");
+        if (drawDescription == null && !descriptionWarned) {
+            descriptionWarned = true;
+            warn("GTNEIDefaultHandler.drawDescription not found; no description lines");
+        }
         String mapId = String.valueOf(field(recipeMap, "unlocalizedName"));
         Minecraft mc = Minecraft.getMinecraft();
         FontRenderer realFont = mc.fontRenderer;
@@ -220,7 +226,11 @@ public final class NeiHandlerExporter {
                 recorder.lines.clear();
                 try {
                     mc.fontRenderer = recorder;
-                    drawDescription.invoke(handler, cached);
+                    if (drawDescription.getParameterTypes().length == 2) {
+                        drawDescription.invoke(handler, cached, Integer.valueOf(lines.size()));
+                    } else {
+                        drawDescription.invoke(handler, cached);
+                    }
                 } catch (Throwable t) {
                     if (lines.isEmpty()) {
                         warn(mapId + ": description: " + t);
@@ -361,12 +371,15 @@ public final class NeiHandlerExporter {
             putNumber(out, "borderU", field(d, "borderWidthU"));
             putNumber(out, "borderV", field(d, "borderWidthV"));
         }
-        // Wrappers (fallbackable textures, colour overrides) hold the real drawable inside.
-        for (String inner : new String[] { "drawable", "texture", "fallback", "primary" }) {
-            Object v = field(d, inner);
-            if (v != null && v != d && location == null && !(v instanceof Number) && !(v instanceof String)) {
-                out.put("inner", drawable(v, depth + 1));
-                break;
+        // Wrappers (fallbackable textures, colour overrides, lambdas such as DrawableWidget's)
+        // hold the real drawable in a field; take the first one that leads to a texture.
+        if (location == null) {
+            for (Object v : objectFields(d)) {
+                Map<String, Object> inner = drawable(v, depth + 1);
+                if (inner.containsKey("location") || inner.containsKey("inner")) {
+                    out.put("inner", inner);
+                    break;
+                }
             }
         }
         return out;
@@ -441,6 +454,28 @@ public final class NeiHandlerExporter {
         return null;
     }
 
+    /** Values of an object's instance fields that are objects (not numbers, strings or arrays). */
+    private static List<Object> objectFields(Object target) {
+        List<Object> out = new ArrayList<Object>();
+        for (Class<?> c = target.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive() || f.getType().isArray()) {
+                    continue;
+                }
+                try {
+                    f.setAccessible(true);
+                    Object v = f.get(target);
+                    if (v != null && v != target && !(v instanceof Number) && !(v instanceof CharSequence)
+                        && !(v instanceof Boolean) && !(v instanceof Enum)) {
+                        out.add(v);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return out;
+    }
+
     private static int intField(Object target, String name) {
         Object v = field(target, name);
         return v instanceof Number ? ((Number) v).intValue() : 0;
@@ -503,10 +538,12 @@ public final class NeiHandlerExporter {
         return null;
     }
 
+    /** A declared method by name taking one or two arguments (signatures change between versions). */
     private static Method declaredMethod(String className, String name) {
         try {
             for (Method m : Class.forName(className).getDeclaredMethods()) {
-                if (m.getName().equals(name) && m.getParameterTypes().length == 1) {
+                int n = m.getParameterTypes().length;
+                if (m.getName().equals(name) && (n == 1 || n == 2)) {
                     m.setAccessible(true);
                     return m;
                 }
