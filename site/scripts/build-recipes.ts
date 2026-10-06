@@ -349,6 +349,17 @@ console.timeEnd('read export');
 // ---------------------------------------------------------------- handlers as NEI shows them
 
 let allHandlers: KHandler[];
+
+/** The exporter writes some floats as strings ("0.5"); texture coordinates must be numbers. */
+function numbers(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(numbers);
+  if (!v || typeof v !== 'object') return v;
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v)) {
+    out[k] = typeof x === 'string' && /^(u0|v0|u1|v1)$/.test(k) && !Number.isNaN(Number(x)) ? Number(x) : numbers(x);
+  }
+  return out;
+}
 const slotsOf = (list: Res[] | undefined) => (list ?? []).map((r) => slotOf({ ...r, amount: 1 })).filter((s): s is KSlot => !!s);
 
 if (neiExport.length) {
@@ -370,7 +381,7 @@ if (neiExport.length) {
         recipes.push({ ...r, lines: e.lines?.[n] });
       });
       if (!recipes.length) continue;
-      const layout = e.layout ?? {};
+      const layout = numbers(e.layout ?? {}) as GtLayout;
       h = {
         id: e.id ?? e.map, orderId: e.id ?? e.map, name: e.name ?? e.map, kind: 'gt', catalysts: [], recipes,
         layout, height: 135, yShift: 8, multiple: true,
@@ -483,7 +494,7 @@ function numberRecipe(r: KRecipe, amperage = 1): NeiRecipe {
       if (r.sp.length) g.sp = numberSlots(r.sp);
       if (r.f !== undefined) g.f = r.f;
       // Keep only the description lines the site cannot rebuild from the numbers.
-      if (r.lines) {
+      if (r.lines?.length) {
         const std = standardLines(r.e, r.d, amperage);
         const lines = r.lines.filter((l) => l !== '');
         if (std.every((l, i) => lines[i] === l)) {

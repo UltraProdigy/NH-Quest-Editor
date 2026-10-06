@@ -210,7 +210,12 @@ export function drawGtBackground(gfx: Gfx, h: NeiHandler, _r: NeiRecipe, x: numb
     const wx = x + w.pos[0], wy = y + w.pos[1];
     for (const d of w.background ?? []) drawDrawable(gfx, d, wx, wy, w.size[0], w.size[1]);
     if (w.type.includes('ProgressBar')) drawProgressBar(gfx, w, wx, wy, now);
-    else if (w.drawable) drawDrawable(gfx, w.drawable, wx, wy, w.size[0], w.size[1]);
+    else if (w.drawable) {
+      // Exports before the drawable lookup followed lambdas lost the logo's texture; GT's logo
+      // is the 17x17 picture.
+      const d = unwrap(w.drawable)?.location ? w.drawable : w.size[0] === 17 && w.size[1] === 17 ? LOGO : undefined;
+      drawDrawable(gfx, d, wx, wy, w.size[0], w.size[1]);
+    }
   }
 }
 
