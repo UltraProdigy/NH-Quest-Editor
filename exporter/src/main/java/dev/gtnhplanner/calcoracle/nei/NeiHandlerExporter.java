@@ -15,6 +15,7 @@ import java.util.TreeSet;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 
 import dev.gtnhplanner.calcoracle.GtnhCalcOracleMod;
@@ -65,7 +66,173 @@ public final class NeiHandlerExporter {
         }
         out.put("handlers", handlers);
         out.put("fuels", fuels());
+        try {
+            out.put("gtLookup", gtLookup());
+        } catch (Throwable t) {
+            warn("gtLookup: " + t);
+        }
         return out;
+    }
+
+    // ------------------------------------------------------------------------------------- GT lookups
+
+    /**
+     * What GTNEIDefaultHandler adds to a lookup besides the item itself (loadCraftingRecipes and
+     * loadUsageRecipes): GregTech's unification (equivalent items and the one GT turns them into),
+     * the "familiar" prefixes (dust, small and tiny dust; ingot and nugget; every ore stone), the
+     * fluid in a container and every container of that fluid, and the nanochip circuit components.
+     * Items are written as "registryId@meta" so this stays small and needs no icons.
+     */
+    private Map<String, Object> gtLookup() {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        try {
+            out.put("unification", unification());
+        } catch (Throwable t) {
+            warn("gtLookup unification: " + t);
+        }
+        try {
+            out.put("fluidContainers", fluidContainers());
+        } catch (Throwable t) {
+            warn("gtLookup fluid containers: " + t);
+        }
+        out.put("recipeAssociations", associations("NEI_RECIPE_ASSOCIATIONS"));
+        out.put("usageAssociations", associations("NEI_USAGE_ASSOCIATIONS"));
+        return out;
+    }
+
+    /**
+     * GTOreDictUnificator's associations, grouped by prefix and material ("dustIron"): the items,
+     * the one GT unifies them to, those on the unification blacklist, and the unified items of the
+     * prefix's familiar prefixes for the same material.
+     */
+    private List<Map<String, Object>> unification() throws Exception {
+        Class<?> unificator = Class.forName("gregtech.api.util.GTOreDictUnificator");
+        Class<?> prefixes = Class.forName("gregtech.api.enums.OrePrefixes");
+        Method getNoCopy = unificator.getMethod("get_nocopy", boolean.class, ItemStack.class);
+        Method isBlacklisted = unificator.getMethod("isBlacklisted", ItemStack.class);
+        Method getPrefixed = unificator.getMethod("get", prefixes, Object.class, long.class);
+        Object data = staticField(unificator.getName(), "sItemStack2DataMap");
+        if (!(data instanceof Map)) {
+            warn("gtLookup: GTOreDictUnificator.sItemStack2DataMap not found");
+            return new ArrayList<Map<String, Object>>();
+        }
+        Map<String, Map<String, Object>> groups = new LinkedHashMap<String, Map<String, Object>>();
+        for (Map.Entry<?, ?> e : new ArrayList<Map.Entry<?, ?>>(((Map<?, ?>) data).entrySet())) {
+            Object itemData = e.getValue();
+            if (!Boolean.TRUE.equals(call(itemData, "hasValidPrefixMaterialData"))) {
+                continue;
+            }
+            Object k = e.getKey();
+            ItemStack stack = k instanceof ItemStack ? (ItemStack) k : asStack(call(k, "toStack"));
+            String key = key(stack);
+            if (key == null) {
+                continue;
+            }
+            String name = String.valueOf(itemData);
+            Map<String, Object> group = groups.get(name);
+            if (group == null) {
+                group = new LinkedHashMap<String, Object>();
+                group.put("name", name);
+                String target = key(asStack(getNoCopy.invoke(null, Boolean.FALSE, stack)));
+                if (target != null) {
+                    group.put("target", target);
+                }
+                Object material = field(field(itemData, "mMaterial"), "mMaterial");
+                List<Object> familiar = new ArrayList<Object>();
+                for (Object p : iterable(field(field(itemData, "mPrefix"), "mFamiliarPrefixes"))) {
+                    try {
+                        String f = key(asStack(getPrefixed.invoke(null, p, material, Long.valueOf(1))));
+                        if (f != null) {
+                            familiar.add(f);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+                if (!familiar.isEmpty()) {
+                    group.put("familiar", familiar);
+                }
+                group.put("items", new ArrayList<Object>());
+                groups.put(name, group);
+            }
+            listOf(group, "items").add(key);
+            if (Boolean.TRUE.equals(isBlacklisted.invoke(null, stack))) {
+                listOf(group, "blacklisted").add(key);
+            }
+        }
+        return new ArrayList<Map<String, Object>>(groups.values());
+    }
+
+    /** Forge's registered fluid containers: [filled item, fluid name, amount, empty item]. */
+    private List<Object> fluidContainers() {
+        List<Object> out = new ArrayList<Object>();
+        for (Object d : iterable(callStatic("net.minecraftforge.fluids.FluidContainerRegistry", "getRegisteredFluidContainerData"))) {
+            String filled = key(asStack(field(d, "filledContainer")));
+            Object fluid = call(field(d, "fluid"), "getFluid");
+            Object fluidName = call(fluid, "getName");
+            if (filled == null || fluidName == null) {
+                continue;
+            }
+            List<Object> row = new ArrayList<Object>();
+            row.add(filled);
+            row.add(String.valueOf(fluidName));
+            Object amount = field(field(d, "fluid"), "amount");
+            row.add(amount instanceof Number ? amount : Integer.valueOf(0));
+            String empty = key(asStack(field(d, "emptyContainer")));
+            if (empty != null) {
+                row.add(empty);
+            }
+            out.add(row);
+        }
+        return out;
+    }
+
+    /** CCNEIRepresentation's maps: item -> the nanochip components NEI also looks up for it. */
+    private Map<String, Object> associations(String fieldName) {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        Object map = staticField("gregtech.common.tileentities.machines.multi.nanochip.util.CCNEIRepresentation", fieldName);
+        if (!(map instanceof Map)) {
+            return out;
+        }
+        for (Map.Entry<?, ?> e : ((Map<?, ?>) map).entrySet()) {
+            String from = key(asStack(e.getKey()));
+            if (from == null) {
+                continue;
+            }
+            List<Object> to = new ArrayList<Object>();
+            for (Object s : iterable(e.getValue())) {
+                String k = key(asStack(s));
+                if (k != null) {
+                    to.add(k);
+                }
+            }
+            if (!to.isEmpty()) {
+                out.put(from, to);
+            }
+        }
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> listOf(Map<String, Object> map, String name) {
+        Object list = map.get(name);
+        if (!(list instanceof List)) {
+            list = new ArrayList<Object>();
+            map.put(name, list);
+        }
+        return (List<Object>) list;
+    }
+
+    private static ItemStack asStack(Object o) {
+        return o instanceof ItemStack ? (ItemStack) o : null;
+    }
+
+    /** "registryId@meta", as the export's item ids. */
+    private static String key(ItemStack stack) {
+        if (stack == null || stack.getItem() == null) {
+            return null;
+        }
+        Object name = Item.itemRegistry.getNameForObject(stack.getItem());
+        return name == null ? null : name + "@" + stack.getItemDamage();
     }
 
     // ------------------------------------------------------------------------------------- handlers
