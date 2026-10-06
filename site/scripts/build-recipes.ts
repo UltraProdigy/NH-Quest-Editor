@@ -614,7 +614,6 @@ writeFileSync(join(outDir, 'handlers.json'), JSON.stringify({ format: 1, handler
 // its containers); list the related keys that have GregTech recipes of their own.
 const lookup = gtLookup(gtLookupExport, {
   nbt: [...items.values()].filter((it) => it.nbt).map((it) => [it.key, it.nbt!] as [string, string]),
-  hash: nbtHash,
 });
 const isGt = allHandlers.map((h) => h.kind === 'gt');
 const hasGt = (key: string, kind: 'm' | 'u') => [...(refs.get(key)?.[kind].keys() ?? [])].some((h) => isGt[h]);

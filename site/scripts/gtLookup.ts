@@ -34,10 +34,69 @@ export interface GtLookupExport {
 
 /** What the build knows besides the export's gtLookup. */
 export interface GtLookupOptions {
-  /** Stacks with NBT ("registryId@meta#hash") and their NBT, for fluid containers that keep their fluid in it. */
+  /**
+   * The recipes' stacks with NBT ("registryId@meta#hash") and their NBT: fluid containers that
+   * keep their fluid in it, and the data sticks.
+   */
   nbt?: Iterable<[key: string, nbt: string]>;
-  /** The build's NBT hash, to key the data sticks the way the recipes do. */
-  hash?: (nbt: string) => string;
+}
+
+/**
+ * NBT as NBTBase.toString writes it (1.7.10: {a:1b,b:"x",c:[0:1s,]}), with compound keys sorted.
+ * A copied stack's tag can list its keys in another order (NBTTagCompound is a HashMap), so the
+ * same tag is compared in this form.
+ */
+export function canonicalNbt(nbt: string): string {
+  let i = 0;
+  const ws = () => {
+    while (i < nbt.length && /\s/.test(nbt[i])) i++;
+  };
+  const value = (): string => {
+    ws();
+    const c = nbt[i];
+    if (c === '{') {
+      i++;
+      const entries: string[] = [];
+      for (ws(); i < nbt.length && nbt[i] !== '}'; ws()) {
+        const k = token(':');
+        i++; // ':'
+        entries.push(`${k}:${value()}`);
+        ws();
+        if (nbt[i] === ',') i++;
+      }
+      i++;
+      return `{${entries.sort().join(',')}}`;
+    }
+    if (c === '[') {
+      i++;
+      const items: string[] = [];
+      for (ws(); i < nbt.length && nbt[i] !== ']'; ws()) {
+        // Lists are written "index:value"; arrays ([B;...]) and older forms may not be.
+        const start = i;
+        const k = token(':,]');
+        if (nbt[i] === ':' && /^\d+$/.test(k)) i++;
+        else i = start;
+        items.push(value());
+        ws();
+        if (nbt[i] === ',') i++;
+      }
+      i++;
+      return `[${items.join(',')}]`;
+    }
+    if (c === '"') {
+      const start = i++;
+      while (i < nbt.length && nbt[i] !== '"') i += nbt[i] === '\\' ? 2 : 1;
+      i++;
+      return nbt.slice(start, i);
+    }
+    return token(',}]');
+  };
+  const token = (stops: string) => {
+    const start = i;
+    while (i < nbt.length && !stops.includes(nbt[i])) i++;
+    return nbt.slice(start, i).trim();
+  };
+  return value();
 }
 
 /** The fluid an item's NBT holds (FluidStack.writeToNBT under "Fluid", as IFluidContainerItems keep it). */
@@ -46,7 +105,8 @@ export function nbtFluid(nbt: string): string | undefined {
 }
 
 const WILDCARD = 32767;
-const GT_ORES = 'gregtech:gt.blockores';
+/** GT's ore blocks: gt.blockores, and gt.blockores2 to 7 in newer GT. */
+const GT_ORES = /^(gregtech:gt\.blockores\d*)@(\d+)$/;
 
 export interface GtLookup {
   /** Keys whose GT recipes also show for "R" on key (key itself not included). */
@@ -82,8 +142,15 @@ export function gtLookup(data: GtLookupExport | undefined, opts: GtLookupOptions
     if (f && !fluidOf.has(key)) fluidOf.set(key, f);
   }
   // AssemblyLineUtils.getDataStickOutput: a data stick also looks up the recipe it holds.
+  const stickByNbt = new Map<string, string>();
+  for (const [stick, nbt, out] of data?.dataSticks ?? []) stickByNbt.set(`${stick}|${canonicalNbt(nbt)}`, out);
   const stickOutput = new Map<string, string>();
-  if (opts.hash) for (const [stick, nbt, out] of data?.dataSticks ?? []) stickOutput.set(`${stick}#${opts.hash(nbt)}`, out);
+  if (stickByNbt.size) {
+    for (const [key, nbt] of opts.nbt ?? []) {
+      const out = stickByNbt.get(`${key.replace(/#.*$/, '')}|${canonicalNbt(nbt)}`);
+      if (out) stickOutput.set(key, out);
+    }
+  }
 
   /** GTUtility.getFluidForFilledItem / StackInfo.getFluid, then the display stack and every container. */
   function fluidStacks(key: string, out: Set<string>) {
@@ -116,8 +183,8 @@ export function gtLookup(data: GtLookupExport | undefined, opts: GtLookupOptions
       if (stick) s.add(stick);
       for (const a of data?.recipeAssociations?.[key] ?? []) s.add(a);
       // Ore blocks: the same ore in every stone (meta % 1000 + stone * 1000).
-      const m = /^(.*)@(\d+)$/.exec(key);
-      if (m && m[1] === GT_ORES) for (let i = 0; i < 8; i++) s.add(`${GT_ORES}@${(Number(m[2]) % 1000) + i * 1000}`);
+      const ore = GT_ORES.exec(key);
+      if (ore) for (let n = 0; n < 8; n++) s.add(`${ore[1]}@${(Number(ore[2]) % 1000) + n * 1000}`);
       fluidStacks(key, s);
       // A recipe's output slot also holds every item GT unifies to that output
       // (GTOreDictUnificator.getNonUnifiedStacks), so each looked-up item matches its target's recipes.

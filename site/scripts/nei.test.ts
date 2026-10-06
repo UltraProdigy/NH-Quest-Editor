@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { standardLines } from '../src/nei/text.ts';
 import { shardOf, INDEX_SHARDS } from '../src/nei/model.ts';
-import { gtLookup, nbtFluid } from './gtLookup.ts';
+import { gtLookup, nbtFluid, canonicalNbt } from './gtLookup.ts';
 
 test('standard GT description lines match what GregTech draws', () => {
   // From the EBF and distillation tower in game (GT5U.nei.display.*).
@@ -58,18 +58,33 @@ test('GT lookups for stacks with NBT, fluid display stacks and GT++ components',
   const gt = gtLookup(
     {
       fluidContainers: [['gt:cell@1', 'water', 1000, 'gt:cell@0']],
-      dataSticks: [['gt:stick@0', '{output:{id:1}}', 'gt:motor@1']],
+      dataSticks: [['gt:stick@0', '{title:"Motor",output:{id:1s,Count:1b}}', 'gt:motor@1']],
       fluidDisplay: 'gregtech:gt.GregTech_FluidDisplay',
       fluidIds: { water: 1 },
       componentFamiliar: { 'miscutils:dustFoo@0': ['miscutils:dustSmallFoo@0', 'miscutils:dustTinyFoo@0'] },
     },
-    { nbt: [['gt:flask@0#abc', '{Fluid:{FluidName:"water",Amount:50}}']], hash: (n) => `h${n.length}` },
+    {
+      nbt: [
+        ['gt:flask@0#abc', '{Fluid:{FluidName:"water",Amount:50}}'],
+        // The recipe's copy of the stick lists its keys in another order.
+        ['gt:stick@0#def', '{output:{Count:1b,id:1s},title:"Motor"}'],
+      ],
+    },
   );
   assert.deepEqual(new Set(gt.recipes('gt:flask@0#abc')), new Set(['fluid:water', 'gt:cell@1']));
   assert.deepEqual(new Set(gt.recipes('gregtech:gt.GregTech_FluidDisplay@1')), new Set(['fluid:water', 'gt:cell@1']));
-  assert.deepEqual(gt.recipes('gt:stick@0#h15'), ['gt:motor@1']);
-  assert.deepEqual(gt.usages('gt:stick@0#h15'), ['gt:motor@1']);
+  assert.deepEqual(gt.recipes('gt:stick@0#def'), ['gt:motor@1']);
+  assert.deepEqual(gt.usages('gt:stick@0#def'), ['gt:motor@1']);
+  // Newer GT ore blocks (gt.blockores2..7) are found in every stone too.
+  assert.ok(gt.recipes('gregtech:gt.blockores2@1032').includes('gregtech:gt.blockores2@7032'));
   assert.equal(gt.recipes('miscutils:dustFoo@0').length, 2);
   const keys = new Set(gt.keys());
-  for (const k of ['gt:flask@0#abc', 'gregtech:gt.GregTech_FluidDisplay@1', 'gt:stick@0#h15', 'miscutils:dustFoo@0']) assert.ok(keys.has(k), k);
+  for (const k of ['gt:flask@0#abc', 'gregtech:gt.GregTech_FluidDisplay@1', 'gt:stick@0#def', 'miscutils:dustFoo@0']) assert.ok(keys.has(k), k);
+});
+
+test('NBT compares regardless of key order', () => {
+  const a = '{author:"A",output:{Damage:0s,Count:1b,id:5536s},display:{Name:"Reads, \\"x\\""},pages:[0:"p, q",1:"r"],title:"T"}';
+  const b = '{author:"A",display:{Name:"Reads, \\"x\\""},output:{Damage:0s,id:5536s,Count:1b},title:"T",pages:[0:"p, q",1:"r"]}';
+  assert.equal(canonicalNbt(a), canonicalNbt(b));
+  assert.notEqual(canonicalNbt(a), canonicalNbt(b.replace('"T"', '"U"')));
 });
