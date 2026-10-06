@@ -23,6 +23,26 @@ export interface GtLookupExport {
   /** Nanochip components NEI also shows for an item (CCNEIRepresentation). */
   recipeAssociations?: Record<string, string[]>;
   usageAssociations?: Record<string, string[]>;
+  /** GT++ components: the same material's items of the familiar prefixes. */
+  componentFamiliar?: Record<string, string[]>;
+  /** Assembly line data sticks: [stick, its NBT as exported, the recipe's output]. */
+  dataSticks?: [string, string, string][];
+  /** GT's fluid display item; its damage is the Forge fluid id (fluidIds). */
+  fluidDisplay?: string;
+  fluidIds?: Record<string, number>;
+}
+
+/** What the build knows besides the export's gtLookup. */
+export interface GtLookupOptions {
+  /** Stacks with NBT ("registryId@meta#hash") and their NBT, for fluid containers that keep their fluid in it. */
+  nbt?: Iterable<[key: string, nbt: string]>;
+  /** The build's NBT hash, to key the data sticks the way the recipes do. */
+  hash?: (nbt: string) => string;
+}
+
+/** The fluid an item's NBT holds (FluidStack.writeToNBT under "Fluid", as IFluidContainerItems keep it). */
+export function nbtFluid(nbt: string): string | undefined {
+  return /(?:^|[{,])\s*"?Fluid"?\s*:\s*\{[^{}]*?"?FluidName"?\s*:\s*"([^"]+)"/.exec(nbt)?.[1];
 }
 
 const WILDCARD = 32767;
@@ -39,7 +59,7 @@ export interface GtLookup {
 
 type Group = NonNullable<GtLookupExport['unification']>[number];
 
-export function gtLookup(data: GtLookupExport | undefined): GtLookup {
+export function gtLookup(data: GtLookupExport | undefined, opts: GtLookupOptions = {}): GtLookup {
   const groupOf = new Map<string, Group>();
   for (const g of data?.unification ?? []) for (const k of g.items) if (!groupOf.has(k)) groupOf.set(k, g);
   const group = (key: string) => groupOf.get(key) ?? groupOf.get(key.replace(/@\d+$/, `@${WILDCARD}`));
@@ -52,6 +72,18 @@ export function gtLookup(data: GtLookupExport | undefined): GtLookup {
     if (!list) containersOf.set(fluid, [filled]);
     else if (!list.includes(filled)) list.push(filled);
   }
+  // Fluid display stacks (StackInfo.getFluid) and containers holding their fluid in NBT
+  // (GTUtility.getFluidForFilledItem with IFluidContainerItem).
+  if (data?.fluidDisplay) {
+    for (const [name, id] of Object.entries(data.fluidIds ?? {})) fluidOf.set(`${data.fluidDisplay}@${id}`, name);
+  }
+  for (const [key, nbt] of opts.nbt ?? []) {
+    const f = nbtFluid(nbt);
+    if (f && !fluidOf.has(key)) fluidOf.set(key, f);
+  }
+  // AssemblyLineUtils.getDataStickOutput: a data stick also looks up the recipe it holds.
+  const stickOutput = new Map<string, string>();
+  if (opts.hash) for (const [stick, nbt, out] of data?.dataSticks ?? []) stickOutput.set(`${stick}#${opts.hash(nbt)}`, out);
 
   /** GTUtility.getFluidForFilledItem / StackInfo.getFluid, then the display stack and every container. */
   function fluidStacks(key: string, out: Set<string>) {
@@ -79,6 +111,9 @@ export function gtLookup(data: GtLookupExport | undefined): GtLookup {
       const s = new Set<string>([key, unified(key, true)]);
       const g = group(key);
       if (g && !g.blacklisted?.includes(key)) for (const f of g.familiar ?? []) s.add(f);
+      for (const f of data?.componentFamiliar?.[key] ?? []) s.add(f);
+      const stick = stickOutput.get(key);
+      if (stick) s.add(stick);
       for (const a of data?.recipeAssociations?.[key] ?? []) s.add(a);
       // Ore blocks: the same ore in every stone (meta % 1000 + stone * 1000).
       const m = /^(.*)@(\d+)$/.exec(key);
@@ -92,6 +127,8 @@ export function gtLookup(data: GtLookupExport | undefined): GtLookup {
     usages(key) {
       const s = new Set<string>([key, unified(key, false)]);
       for (const f of group(key)?.familiar ?? []) s.add(f);
+      const stick = stickOutput.get(key);
+      if (stick) s.add(stick);
       for (const a of data?.usageAssociations?.[key] ?? []) s.add(a);
       fluidStacks(key, s);
       return finish(key, s);
@@ -100,6 +137,8 @@ export function gtLookup(data: GtLookupExport | undefined): GtLookup {
       yield* groupOf.keys();
       yield* fluidOf.keys();
       for (const f of containersOf.keys()) yield `fluid:${f}`;
+      yield* stickOutput.keys();
+      yield* Object.keys(data?.componentFamiliar ?? {});
       yield* Object.keys(data?.recipeAssociations ?? {});
       yield* Object.keys(data?.usageAssociations ?? {});
     },

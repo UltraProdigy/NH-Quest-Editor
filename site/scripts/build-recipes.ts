@@ -96,6 +96,7 @@ interface ItemRec {
   name: string;
   mod: string;
   icon?: string;
+  nbt?: string;
 }
 const items = new Map<string, ItemRec>();
 const byRegistry = new Map<string, Set<string>>();
@@ -117,7 +118,10 @@ function itemKeyOf(r: Res): string | null {
   const key = r.nbt && r.nbt !== '{}' ? `${base}#${nbtHash(r.nbt)}` : base;
   const prev = items.get(key);
   if (!prev) {
-    items.set(key, { key, name: r.displayName ?? key, mod: r.modId ?? reg.slice(0, reg.indexOf(':')), icon: r.icon });
+    items.set(key, {
+      key, name: r.displayName ?? key, mod: r.modId ?? reg.slice(0, reg.indexOf(':')), icon: r.icon,
+      ...(key !== base ? { nbt: r.nbt } : {}),
+    });
     let set = byRegistry.get(reg);
     if (!set) byRegistry.set(reg, (set = new Set()));
     set.add(key);
@@ -608,12 +612,16 @@ writeFileSync(join(outDir, 'handlers.json'), JSON.stringify({ format: 1, handler
 
 // GregTech tabs also show the recipes of related items (unified and familiar items, a fluid and
 // its containers); list the related keys that have GregTech recipes of their own.
-const lookup = gtLookup(gtLookupExport);
+const lookup = gtLookup(gtLookupExport, {
+  nbt: [...items.values()].filter((it) => it.nbt).map((it) => [it.key, it.nbt!] as [string, string]),
+  hash: nbtHash,
+});
 const isGt = allHandlers.map((h) => h.kind === 'gt');
 const hasGt = (key: string, kind: 'm' | 'u') => [...(refs.get(key)?.[kind].keys() ?? [])].some((h) => isGt[h]);
 const related = new Map<string, { gm?: string[]; gu?: string[] }>();
 let relatedCount = 0;
 for (const key of new Set([...lookup.keys(), ...keys.map(baseKey)])) {
+  // Stacks with NBT (data sticks, filled containers) are looked up under their full key.
   const gm = lookup.recipes(key).filter((k) => hasGt(k, 'm'));
   const gu = lookup.usages(key).filter((k) => hasGt(k, 'u'));
   if (!gm.length && !gu.length) continue;

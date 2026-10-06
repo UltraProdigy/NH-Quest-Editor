@@ -31,6 +31,30 @@ export const dependantsOf = (id: string) => dependants.get(id) ?? [];
 export const linesContaining = (id: string) => linesOf.get(id) ?? [];
 export const isInAnyLine = (id: string) => (linesOf.get(id)?.length ?? 0) > 0;
 
+/**
+ * The fluid a quest item stack keeps in its NBT ("Fluid", as fluid containers store it), by stack
+ * key. Built on first use.
+ */
+let nbtFluids: Map<string, string> | null = null;
+export function questNbtFluid(key: string): string | undefined {
+  if (!nbtFluids) {
+    nbtFluids = new Map();
+    const walk = (v: unknown) => {
+      if (Array.isArray(v)) return v.forEach(walk);
+      if (!v || typeof v !== 'object') return;
+      const o = v as Record<string, unknown>;
+      if (typeof o.k === 'string' && o.nbt && typeof o.nbt === 'object') {
+        const f = (o.nbt as Record<string, unknown>).Fluid as Record<string, unknown> | undefined;
+        const name = f && (f.FluidName ?? f.fluid);
+        if (typeof name === 'string' && name) nbtFluids!.set(o.k, name);
+      }
+      for (const k in o) if (k !== 'nbt') walk(o[k]);
+    };
+    walk(book.quests);
+  }
+  return nbtFluids.get(key);
+}
+
 /** A quest property with the database default applied. */
 export function prop<T = unknown>(q: Quest, key: string): T {
   return (key in q.props ? q.props[key] : book.defaults[key]) as T;

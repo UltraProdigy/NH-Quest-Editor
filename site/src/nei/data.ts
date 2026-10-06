@@ -100,6 +100,28 @@ function finish(m: Map<number, Set<number> | null>): HandlerRecipes[] {
 const baseKey = (key: string) => key.replace(/#.*$/, '');
 
 /**
+ * The fluid a stack with NBT holds, for stacks the index does not know by their full key (quest
+ * items). Installed by main.ts.
+ */
+export const nbtFluidOf = { get: (_key: string): string | undefined => undefined };
+
+/** Keys whose GregTech recipes (gm) or usages (gu) also show for this one. */
+async function related(key: string, e: NeiIndexShard[string] | undefined, kind: 'gm' | 'gu'): Promise<string[]> {
+  const out = new Set(e?.[kind] ?? []);
+  if (key.includes('#')) {
+    // Stacks whose NBT matters to GregTech: data sticks and containers holding their fluid in NBT.
+    for (const k of (await entry(key))?.[kind] ?? []) out.add(k);
+    const fluid = nbtFluidOf.get(key);
+    if (fluid) {
+      out.add(`fluid:${fluid}`);
+      for (const k of (await entry(`fluid:${fluid}`))?.[kind] ?? []) out.add(k);
+    }
+  }
+  out.delete(baseKey(key));
+  return [...out];
+}
+
+/**
  * The recipes that make an item ("R" in NEI). GregTech tabs also list the recipes of the items
  * GregTech relates to it (GTNEIDefaultHandler.loadCraftingRecipes): its unified and familiar
  * items, and for a fluid or a filled container the fluid and all its containers.
@@ -109,7 +131,7 @@ export async function recipesFor(key: string): Promise<HandlerRecipes[]> {
   const m = new Map<number, Set<number> | null>();
   const e = await entry(baseKey(key));
   merge(m, e?.m);
-  for (const r of await Promise.all((e?.gm ?? []).map(entry))) merge(m, r?.m, true);
+  for (const r of await Promise.all((await related(key, e, 'gm')).map(entry))) merge(m, r?.m, true);
   return finish(m);
 }
 
@@ -124,7 +146,7 @@ export async function usagesFor(key: string): Promise<HandlerRecipes[]> {
   const e = await entry(base);
   for (const h of e?.c ?? []) m.set(h, null);
   merge(m, e?.u);
-  for (const r of await Promise.all((e?.gu ?? []).map(entry))) merge(m, r?.u, true);
+  for (const r of await Promise.all((await related(key, e, 'gu')).map(entry))) merge(m, r?.u, true);
   const idx = keyIndex.get(base);
   if (idx !== undefined) {
     const ores = oreOf.get(idx) ?? [];

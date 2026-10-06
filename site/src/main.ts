@@ -8,7 +8,8 @@ import { fetchJson, resourceUrl, siteUrl } from './gui/assets.ts';
 import { textLinks, itemLookup } from './gui/widgets.ts';
 import { openLookup, RecipeScreen, type RecipeMode } from './nei/recipeScreen.ts';
 import { splitString, plainText, setForceMonochrome } from './gui/text.ts';
-import { loadQuestbook, quest as getQuest, fullId, linesContaining, view, type QuestState } from './store.ts';
+import { loadQuestbook, quest as getQuest, fullId, linesContaining, view, questNbtFluid, type QuestState } from './store.ts';
+import { nbtFluidOf } from './nei/data.ts';
 import { QuestLinesScreen } from './screens/questLines.ts';
 import { QuestScreen } from './screens/quest.ts';
 import { SearchScreen } from './screens/search.ts';
@@ -81,6 +82,7 @@ async function start() {
 
   // NEI: left click on an item shows its recipes, right click its uses.
   itemLookup.open = (key, mode) => {
+  nbtFluidOf.get = questNbtFluid;
     if (host.screen) void openLookup(host.screen, key, mode);
   };
 

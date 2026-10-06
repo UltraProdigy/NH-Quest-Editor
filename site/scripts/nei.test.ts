@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { standardLines } from '../src/nei/text.ts';
 import { shardOf, INDEX_SHARDS } from '../src/nei/model.ts';
-import { gtLookup } from './gtLookup.ts';
+import { gtLookup, nbtFluid } from './gtLookup.ts';
 
 test('standard GT description lines match what GregTech draws', () => {
   // From the EBF and distillation tower in game (GT5U.nei.display.*).
@@ -49,4 +49,27 @@ test('GT lookups follow unification, familiar prefixes, fluids and ore stones', 
   assert.deepEqual(gt.recipes('gt:circuit@1'), ['gt:cc@1']);
   // Nothing known: nothing extra.
   assert.deepEqual(gtLookup(undefined).recipes('minecraft:stone@0'), []);
+});
+
+test('GT lookups for stacks with NBT, fluid display stacks and GT++ components', () => {
+  assert.equal(nbtFluid('{Fluid:{Amount:8000,FluidName:"ic2constructionfoam"}}'), 'ic2constructionfoam');
+  assert.equal(nbtFluid('{Capacity:50,Fluid:{FluidName:"water",Amount:50}}'), 'water');
+  assert.equal(nbtFluid('{mDataName:"Any DNA"}'), undefined);
+  const gt = gtLookup(
+    {
+      fluidContainers: [['gt:cell@1', 'water', 1000, 'gt:cell@0']],
+      dataSticks: [['gt:stick@0', '{output:{id:1}}', 'gt:motor@1']],
+      fluidDisplay: 'gregtech:gt.GregTech_FluidDisplay',
+      fluidIds: { water: 1 },
+      componentFamiliar: { 'miscutils:dustFoo@0': ['miscutils:dustSmallFoo@0', 'miscutils:dustTinyFoo@0'] },
+    },
+    { nbt: [['gt:flask@0#abc', '{Fluid:{FluidName:"water",Amount:50}}']], hash: (n) => `h${n.length}` },
+  );
+  assert.deepEqual(new Set(gt.recipes('gt:flask@0#abc')), new Set(['fluid:water', 'gt:cell@1']));
+  assert.deepEqual(new Set(gt.recipes('gregtech:gt.GregTech_FluidDisplay@1')), new Set(['fluid:water', 'gt:cell@1']));
+  assert.deepEqual(gt.recipes('gt:stick@0#h15'), ['gt:motor@1']);
+  assert.deepEqual(gt.usages('gt:stick@0#h15'), ['gt:motor@1']);
+  assert.equal(gt.recipes('miscutils:dustFoo@0').length, 2);
+  const keys = new Set(gt.keys());
+  for (const k of ['gt:flask@0#abc', 'gregtech:gt.GregTech_FluidDisplay@1', 'gt:stick@0#h15', 'miscutils:dustFoo@0']) assert.ok(keys.has(k), k);
 });
