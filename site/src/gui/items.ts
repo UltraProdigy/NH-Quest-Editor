@@ -39,6 +39,9 @@ function lookup(key: string): ItemInfo | undefined {
   return index?.items[key];
 }
 
+/** The quest item index entry of a key (name and quest-pipeline icon), if it has one. */
+export const itemInfo = (key: string): ItemInfo | undefined => lookup(key);
+
 /** Index key of a stack: its exact (NBT) key when that was rendered, else registry name and meta. */
 export function refKey(ref: ItemRef): string {
   return ref.k && lookup(ref.k) ? ref.k : itemKey(ref.id, ref.dmg);

@@ -235,10 +235,36 @@ export const fluidTexture = (f: FluidRef): GuiTexture => ({
   },
 });
 
+/**
+ * What clicking an item does: the host opens NEI's recipes (left button) or usages (right button)
+ * of the item key. Installed by main.ts.
+ */
+export const itemLookup = {
+  open: (_key: string, _mode: 'recipe' | 'usage'): void => {},
+};
+
+/** Left click: recipes, right click: usages (NEI's R and U), for a slot showing `key()`. */
+function lookupOnClick(panel: PanelButton, key: () => string | null) {
+  let pressed = -1;
+  panel.mouseDown = (mx, my, b) => {
+    const hit = contains(panel.transform, mx, my);
+    pressed = hit && (b === 0 || b === 1) ? b : -1;
+    return hit && (b === 0 || b === 1);
+  };
+  panel.mouseUp = (mx, my, b) => {
+    if (pressed !== b) return false;
+    pressed = -1;
+    const k = contains(panel.transform, mx, my) ? key() : null;
+    if (k) itemLookup.open(k, b === 0 ? 'recipe' : 'usage');
+    return !!k;
+  };
+}
+
 /** An item in a slot frame with its tooltip (PanelItemSlot). */
 export class PanelItemSlot extends PanelButton {
   constructor(t: GuiRect, public stack: ItemRef | null, opts: { showCount?: boolean; onClick?: (b: PanelButton) => void } = {}) {
     super(t, { onClick: opts.onClick });
+    if (!opts.onClick) lookupOnClick(this, () => (this.stack ? currentVariant(this.stack) : null));
     const frame = tex('item_frame');
     this.textures = [
       frame,
@@ -263,6 +289,7 @@ export class PanelFluidSlot extends PanelButton {
       new LayeredTexture([frame, new ColorTexture(col('item_highlight'), [1, 1, 1, 1])]),
     ];
     this.setIcon(fluidTexture(fluid), null, 1);
+    lookupOnClick(this, () => `fluid:${this.fluid.fluid}`);
   }
   tooltip(mx: number, my: number): Tooltip {
     return contains(this.transform, mx, my) ? fluidTooltip(this.fluid) : null;

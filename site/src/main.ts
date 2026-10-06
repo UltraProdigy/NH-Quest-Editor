@@ -5,7 +5,8 @@ import { loadLang, tr } from './gui/lang.ts';
 import { registerThemes, setTheme, setShowDependencyArrows, type ThemeJson } from './gui/theme.ts';
 import { loadItems } from './gui/items.ts';
 import { fetchJson, resourceUrl, siteUrl } from './gui/assets.ts';
-import { textLinks } from './gui/widgets.ts';
+import { textLinks, itemLookup } from './gui/widgets.ts';
+import { openLookup, RecipeScreen, type RecipeMode } from './nei/recipeScreen.ts';
 import { splitString, plainText, setForceMonochrome } from './gui/text.ts';
 import { loadQuestbook, quest as getQuest, fullId, linesContaining, view, type QuestState } from './store.ts';
 import { QuestLinesScreen } from './screens/questLines.ts';
@@ -78,6 +79,11 @@ async function start() {
     }
   };
 
+  // NEI: left click on an item shows its recipes, right click its uses.
+  itemLookup.open = (key, mode) => {
+    if (host.screen) void openLookup(host.screen, key, mode);
+  };
+
   // Links inside quest descriptions.
   textLinks.questName = (id) => getQuest(id)?.name ?? null;
   textLinks.tooltip = (link) => {
@@ -104,9 +110,18 @@ async function start() {
     }
   };
 
-  const openRoute = () => {
+  const openRoute = async () => {
     const parts = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
     const [kind, arg, sub] = parts;
+    if ((kind === 'recipe' || kind === 'usage') && arg) {
+      // Reuse the recipe screen chain when going back and forth in the browser history.
+      const cur = host.screen;
+      if (cur instanceof RecipeScreen && cur.route() === location.hash) return;
+      const lines = new QuestLinesScreen(null);
+      lines.host = host;
+      const ok = await openLookup(lines, arg, kind as RecipeMode, { handler: sub, page: Number(parts[3]) || undefined }, false);
+      if (ok) return;
+    }
     if (kind === 'quest' && arg) {
       const id = fullId(arg);
       if (getQuest(id)) {
@@ -138,8 +153,8 @@ async function start() {
     }
     host.show(new QuestLinesScreen(null), false);
   };
-  window.addEventListener('popstate', openRoute);
-  openRoute();
+  window.addEventListener('popstate', () => void openRoute());
+  await openRoute();
   status.remove();
 }
 
