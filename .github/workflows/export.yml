@@ -402,6 +402,23 @@ jobs:
             annotate "crash report" "$WORK/diag-crash.txt" 20000
           fi
 
+      - name: Collect GUI textures for the recipe views
+        if: always()
+        run: |
+          # NEI's window, GregTech's NEI templates and ModularUI's slots are drawn on the site with
+          # the textures the pack ships. They are LGPL, so they are taken from the mod jars here and
+          # published with the game data rather than committed to the repository.
+          dir="$WORK/gui-textures"
+          mkdir -p "$dir"
+          find "$WORK/client/.minecraft/mods" -name '*.jar' -print0 | while IFS= read -r -d '' jar; do
+            unzip -o -q "$jar" 'assets/nei/textures/*' 'assets/gregtech/textures/gui/*' \
+              'assets/modularui/textures/gui/*' -d "$dir" 2>/dev/null || true
+          done
+          if [ -d "$dir/assets" ]; then
+            tar -C "$dir" -czf "$WORK/gui-textures.tar.gz" assets
+            echo "GUI textures: $(find "$dir/assets" -type f | wc -l) files" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Package results
         if: always()
         run: |
@@ -460,7 +477,9 @@ jobs:
             gh release create game-data -R "$GITHUB_REPOSITORY" --latest=false \
               --title "Game data" --notes "Exported from GTNH daily build $tag."
           fi
+          extra=()
+          if [ -f "$WORK/gui-textures.tar.gz" ]; then extra+=("$WORK/gui-textures.tar.gz"); fi
           gh release upload game-data -R "$GITHUB_REPOSITORY" --clobber \
-            "$WORK/export.json.gz" "$WORK/icons-full.tar.gz" "$WORK/daily-tag.txt"
+            "$WORK/export.json.gz" "$WORK/icons-full.tar.gz" "$WORK/daily-tag.txt" "${extra[@]}"
           gh release edit game-data -R "$GITHUB_REPOSITORY" --notes "Exported from GTNH daily build $tag."
           echo "Published game data for $tag" >> "$GITHUB_STEP_SUMMARY"

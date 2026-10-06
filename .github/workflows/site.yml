@@ -88,7 +88,9 @@ jobs:
           repository: GTNewHorizons/GT-New-Horizons-Modpack
           ref: master
           path: modpack
-          sparse-checkout: config/betterquesting
+          sparse-checkout: |
+            config/betterquesting
+            config/NEI
           persist-credentials: false
 
       - name: Set up Node
@@ -124,6 +126,15 @@ jobs:
             tar -xzf ../game-data/icons-full.tar.gz -C ../game-data icons
             DAILY_TAG=$(cat ../game-data/daily-tag.txt) npm run data:items -- \
               ../game-data/export.json.gz ../game-data/icons public/data/questbook.json
+            DAILY_TAG=$(cat ../game-data/daily-tag.txt) npm run data:recipes -- \
+              ../game-data/export.json.gz ../game-data/icons public/data/nei \
+              --ordering ../modpack/config/NEI/handlerordering.csv
+            # NEI, GregTech and ModularUI GUI textures (LGPL) from the pack's jars, for the recipe views.
+            if gh release download game-data -R "$GITHUB_REPOSITORY" -D ../game-data -p gui-textures.tar.gz; then
+              tar -xzf ../game-data/gui-textures.tar.gz -C public
+            else
+              echo "::warning title=No GUI textures::The game-data release has no gui-textures.tar.gz yet; recipe windows lack their textures until the next export."
+            fi
           else
             echo "::warning title=No game data::The game-data release does not exist yet; items show placeholders."
           fi
