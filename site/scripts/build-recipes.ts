@@ -25,6 +25,7 @@ import { parseJsonFile, type Json, type JsonPath } from './jsonStream.ts';
 import type { NeiItems, NeiHandler, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiRecipe, GtLayout } from '../src/nei/model.ts';
 import { standardLines } from '../src/nei/text.ts';
 import { INDEX_SHARDS, shardOf } from '../src/nei/model.ts';
+import { gtLookup, type GtLookupExport } from './gtLookup.ts';
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -200,6 +201,7 @@ const gtHandlers: KHandler[] = [];
 const gtByMap = new Map<string, KHandler>();
 const neiExport: NeiExport[] = [];
 const fuelKeys: string[] = [];
+let gtLookupExport: GtLookupExport | undefined;
 
 /**
  * Grid width of a shaped recipe. Forge's ShapedOreRecipe keeps its width in a field the older
@@ -296,7 +298,7 @@ await parseJsonFile(resolve(exportArg), {
     if (n === 3) {
       domainIds[path[1] as number] = id;
       if (id === 'oreDictionary' && path[2] === 'entries') return 'keep';
-      if (id === 'nei' && (path[2] === 'handlers' || path[2] === 'fuels')) return 'keep';
+      if (id === 'nei' && (path[2] === 'handlers' || path[2] === 'fuels' || path[2] === 'gtLookup')) return 'keep';
       return 'scan';
     }
     if ((id === 'crafting' || id === 'smelting') && path[2] === 'recipes') return n === 4 ? 'scan' : 'keep';
@@ -325,6 +327,7 @@ await parseJsonFile(resolve(exportArg), {
     } else if (path.length === 2 && id === 'nei') {
       const d = v as Record<string, Json>;
       neiExport.push(...((d.handlers ?? []) as unknown as NeiExport[]));
+      gtLookupExport = d.gtLookup as unknown as GtLookupExport | undefined;
       for (const f of (d.fuels ?? []) as unknown as Res[]) {
         const k = itemKeyOf(f);
         if (k) fuelKeys.push(k);
@@ -603,13 +606,30 @@ allHandlers.forEach((h, hi) => {
 const fuels = fuelKeys.map((k) => indexOf.get(k)).filter((i): i is number => i !== undefined);
 writeFileSync(join(outDir, 'handlers.json'), JSON.stringify({ format: 1, handlers: handlersOut, ...(fuels.length ? { fuels } : {}) }));
 
+// GregTech tabs also show the recipes of related items (unified and familiar items, a fluid and
+// its containers); list the related keys that have GregTech recipes of their own.
+const lookup = gtLookup(gtLookupExport);
+const isGt = allHandlers.map((h) => h.kind === 'gt');
+const hasGt = (key: string, kind: 'm' | 'u') => [...(refs.get(key)?.[kind].keys() ?? [])].some((h) => isGt[h]);
+const related = new Map<string, { gm?: string[]; gu?: string[] }>();
+let relatedCount = 0;
+for (const key of new Set([...lookup.keys(), ...keys.map(baseKey)])) {
+  const gm = lookup.recipes(key).filter((k) => hasGt(k, 'm'));
+  const gu = lookup.usages(key).filter((k) => hasGt(k, 'u'));
+  if (!gm.length && !gu.length) continue;
+  related.set(key, { ...(gm.length ? { gm } : {}), ...(gu.length ? { gu } : {}) });
+  relatedCount++;
+}
+
 // Index shards.
 const shards: NeiIndexShard[] = Array.from({ length: INDEX_SHARDS }, () => ({}));
-for (const [key, r] of refs) {
+for (const key of new Set([...refs.keys(), ...related.keys()])) {
+  const r = refs.get(key);
   const e: NeiIndexShard[string] = {};
-  if (r.m.size) e.m = [...r.m].map(([h, list]) => [h, list]);
-  if (r.u.size) e.u = [...r.u].map(([h, list]) => [h, list]);
-  if (r.c?.length) e.c = r.c;
+  if (r?.m.size) e.m = [...r.m].map(([h, list]) => [h, list]);
+  if (r?.u.size) e.u = [...r.u].map(([h, list]) => [h, list]);
+  if (r?.c?.length) e.c = r.c;
+  Object.assign(e, related.get(key));
   shards[shardOf(key)][key] = e;
 }
 shards.forEach((s, i) => writeFileSync(join(outDir, 'index', `${i}.json`), JSON.stringify(s)));
@@ -761,5 +781,6 @@ const total = allHandlers.reduce((a, h) => a + h.recipes.length, 0);
 console.log(
   `recipes: ${total} in ${allHandlers.length} handlers, ${chunkNo} chunks; items: ${keys.length} ` +
     `(${missingIcons} without icon); ore names: ${oreList.length}; index keys: ${refs.size}; ` +
+    `GT related lookups: ${relatedCount}; ` +
     `icons: ${cellOfHash.size} unique in ${sheetSizes.length} sheets, ${(iconBytes / 1048576).toFixed(1)} MB`,
 );

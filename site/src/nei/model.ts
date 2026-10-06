@@ -166,9 +166,13 @@ export interface NeiRecipeChunk {
 /**
  * Index entry of one key (an item's base key "registryId@meta", "fluid:name" or "ore:name"):
  * m = recipes that make it, u = recipes that use it, as [handler, recipe numbers] pairs;
- * c = handlers it is a catalyst of.
+ * c = handlers it is a catalyst of; gm / gu = other keys whose GregTech recipes / usages GregTech's
+ * tabs show for this one too (unified and familiar items, a fluid and its containers).
  */
-export type NeiIndexShard = Record<string, { m?: [number, number[]][]; u?: [number, number[]][]; c?: number[] }>;
+export type NeiIndexShard = Record<
+  string,
+  { m?: [number, number[]][]; u?: [number, number[]][]; c?: number[]; gm?: string[]; gu?: string[] }
+>;
 
 export const INDEX_SHARDS = 256;
 

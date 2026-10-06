@@ -78,8 +78,9 @@ export interface HandlerRecipes {
   recipes: number[] | null;
 }
 
-function merge(into: Map<number, Set<number> | null>, list: [number, number[]][] | undefined) {
+function merge(into: Map<number, Set<number> | null>, list: [number, number[]][] | undefined, gtOnly = false) {
   for (const [h, rs] of list ?? []) {
+    if (gtOnly && handlers[h]?.kind !== 'gt') continue;
     if (into.has(h) && into.get(h) === null) continue;
     let set = into.get(h);
     if (!set) into.set(h, (set = new Set()));
@@ -98,15 +99,24 @@ function finish(m: Map<number, Set<number> | null>): HandlerRecipes[] {
 
 const baseKey = (key: string) => key.replace(/#.*$/, '');
 
-/** The recipes that make an item ("R" in NEI). */
+/**
+ * The recipes that make an item ("R" in NEI). GregTech tabs also list the recipes of the items
+ * GregTech relates to it (GTNEIDefaultHandler.loadCraftingRecipes): its unified and familiar
+ * items, and for a fluid or a filled container the fluid and all its containers.
+ */
 export async function recipesFor(key: string): Promise<HandlerRecipes[]> {
   if (!(await loadNei())) return [];
   const m = new Map<number, Set<number> | null>();
-  merge(m, (await entry(baseKey(key)))?.m);
+  const e = await entry(baseKey(key));
+  merge(m, e?.m);
+  for (const r of await Promise.all((e?.gm ?? []).map(entry))) merge(m, r?.m, true);
   return finish(m);
 }
 
-/** The recipes that use an item ("U" in NEI): as an ingredient, through its ore names, or as a catalyst. */
+/**
+ * The recipes that use an item ("U" in NEI): as an ingredient, through its ore names, or as a
+ * catalyst; GregTech tabs add the usages of related items (GTNEIDefaultHandler.loadUsageRecipes).
+ */
 export async function usagesFor(key: string): Promise<HandlerRecipes[]> {
   if (!(await loadNei())) return [];
   const base = baseKey(key);
@@ -114,6 +124,7 @@ export async function usagesFor(key: string): Promise<HandlerRecipes[]> {
   const e = await entry(base);
   for (const h of e?.c ?? []) m.set(h, null);
   merge(m, e?.u);
+  for (const r of await Promise.all((e?.gu ?? []).map(entry))) merge(m, r?.u, true);
   const idx = keyIndex.get(base);
   if (idx !== undefined) {
     const ores = oreOf.get(idx) ?? [];
