@@ -2,7 +2,7 @@
 // the first time a recipe view needs it and cached.
 
 import { fetchJson, siteUrl, image } from '../gui/assets.ts';
-import { type Gfx } from '../gui/core.ts';
+import { type Gfx, keys as heldKeys } from '../gui/core.ts';
 import { animating, invalidate } from '../gui/frame.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import { drawItemKey, itemInfo } from '../gui/items.ts';
@@ -197,12 +197,31 @@ export function slotItems(s: Slot | null | undefined): number[] {
   return [];
 }
 
+let cycleClock = 0;
+let cycleLast = -1;
+/**
+ * The time cycling stacks follow: it stands still while Shift is held, as NEI's recipe widgets
+ * stop cycling then (RecipeWidget.tickCycle, TemplateRecipeHandler.onUpdate).
+ */
+export function cycleTime(now: number): number {
+  if (cycleLast >= 0 && now > cycleLast && !heldKeys.shift) cycleClock += now - cycleLast;
+  cycleLast = Math.max(cycleLast, now);
+  return cycleClock;
+}
+
+/** Items a slot was moved on by with Shift + scroll (RecipeWidget.scrollPermutations). */
+const slotShift = new WeakMap<object, number>();
+export function shiftSlot(s: Slot, d: number) {
+  if (typeof s === 'object') slotShift.set(s, (slotShift.get(s) ?? 0) + d);
+}
+
 /** NEI cycles every multi-item slot once a second (20 ticks), all in step. */
 export function slotItem(s: Slot | null | undefined, now: number): number {
   const list = slotItems(s);
   if (list.length <= 1) return list[0] ?? -1;
   animating();
-  return list[Math.floor(now / 1000) % list.length];
+  const n = Math.floor(cycleTime(now) / 1000) + (typeof s === 'object' && s ? (slotShift.get(s) ?? 0) : 0);
+  return list[((n % list.length) + list.length) % list.length];
 }
 
 export const slotAmount = (s: Slot | null | undefined) => (s && typeof s === 'object' ? (s.n ?? 1) : 1);

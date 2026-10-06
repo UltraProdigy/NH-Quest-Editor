@@ -15,7 +15,7 @@ import { texture } from '../gui/assets.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import {
   handlerList, recipe as getRecipe, recipesFor, usagesFor, slotItem, slotItems, slotObj, slotAmount, drawNeiItem,
-  itemTooltipLines, itemKeyAt, itemName, itemIndexOf, type HandlerRecipes,
+  itemTooltipLines, itemKeyAt, itemName, itemIndexOf, shiftSlot, type HandlerRecipes,
 } from './data.ts';
 import { recipeSlots, recipeHeight, drawRecipeBackground, drawRecipeForeground, type PlacedSlot } from './handlers.ts';
 import { drawSlotBadge, drawFluidAmount } from './gt.ts';
@@ -437,6 +437,14 @@ export class RecipeScreen extends Screen {
   }
 
   scroll(mx: number, my: number, d: number) {
+    // Shift + scroll over a cycling stack shows its next or previous item (RecipeWidget.onMouseWheel).
+    if (heldKeys.shift) {
+      const hit = this.hovered(mx, my);
+      if (hit?.ps && new Set(slotItems(hit.ps.slot)).size > 1) {
+        shiftSlot(hit.ps.slot, d > 0 ? 1 : -1);
+        return true;
+      }
+    }
     // Over the tabs: switch handler. Shift or over the handler name: switch handler. Elsewhere in
     // the recipes or over the page row: turn the page.
     if (inside(this.tabArea(), mx, my) || heldKeys.shift || inside(this.typeArea(), mx, my)) {
@@ -485,7 +493,7 @@ export class RecipeScreen extends Screen {
     this.lastMouse = [mx, my];
     const hit = this.hovered(mx, my);
     if (hit) {
-      const lines = itemTooltipLines(hit.item);
+      const lines: (string | TipLine)[] = itemTooltipLines(hit.item);
       const o = hit.ps && typeof hit.ps.slot === 'object' ? slotObj(hit.ps.slot) : null;
       if (hit.ps && (hit.h?.badges ?? hit.h?.kind === 'gt')) {
         const n = slotAmount(hit.ps.slot);
@@ -494,19 +502,27 @@ export class RecipeScreen extends Screen {
         else if (o?.c !== undefined) lines.push(`§7${hit.ps.input ? 'Consume' : 'Output'} Chance: ${formatChance(o.c)}`);
       }
       const alts = hit.ps ? slotItems(hit.ps.slot) : [];
-      const accepts: (string | TipLine)[] = lines;
-      if (new Set(alts).size > 1) accepts.push(acceptsFollowing(alts, hit.item));
-      return accepts;
+      const cycling = new Set(alts).size > 1;
+      if (cycling) lines.push(acceptsFollowing(alts, hit.item));
+      // GuiContainerManager.renderToolTips: the hotkeys (or how to show them) under the name, and a
+      // gap after the name.
+      lines.splice(1, 0, ...hotkeyLines(cycling));
+      lines[0] += LINESPACE;
+      return lines;
     }
     for (const { i, r } of this.tabs()) {
       if (inside(r, mx, my)) {
         const h = handlerList()[this.list[i].handler];
         if (!h) return null;
-        return [h.tab ?? h.name, `§9${h.mod ?? handlerMod(h)}`];
+        return [(h.tab ?? h.name) + LINESPACE, `§9${h.mod ?? handlerMod(h)}`];
       }
     }
-    if (inside(this.searchButton(), mx, my)) return ['Recipe search', '§7Only in game'];
+    if (inside(this.searchButton(), mx, my)) return ['Recipe search' + LINESPACE, '§7Only in game'];
     return null;
+  }
+
+  drawTooltip(gfx: Gfx, lines: (string | TipLine)[], mx: number, my: number) {
+    drawMultilineTip(gfx, lines, mx + 12, my - 12, this.width, this.height);
   }
 }
 
@@ -548,6 +564,78 @@ export function acceptsFollowing(list: number[], active: number): TipLine {
       }
     },
   };
+}
+
+/** CodeChickenLib's GuiDraw.TOOLTIP_LINESPACE: a line ending in it is followed by a 2 px gap. */
+const LINESPACE = '\u00a7h';
+
+/**
+ * The hotkeys NEI lists for a stack in the recipe window, as far as the site has them: with Alt
+ * held the list (GuiContainerManager.collectHotkeyTips), otherwise how to show it.
+ */
+function hotkeyLines(cycling: boolean): string[] {
+  if (!heldKeys.alt) return ['§7Hold §6ALT§7 for hotkeys'];
+  const tips: [string, string][] = [
+    ['R', 'Recipe to make this item'],
+    ['U', 'Recipes that use this item'],
+  ];
+  if (cycling) tips.push(['SHIFT + Scroll', 'Change Item']);
+  tips.sort((a, b) => a[0].length - b[0].length || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const out = tips.map(([k, m]) => `§6${k}§8 - §7${m}§r`);
+  out[out.length - 1] += LINESPACE;
+  return out;
+}
+
+/**
+ * CodeChickenLib's GuiDraw.drawMultilineTip, which NEI draws its tooltips with: no wrapping, 10 px
+ * lines (12 after a LINESPACE), drawn code lines at their own size, flipped to the cursor's left
+ * when it would leave the screen.
+ */
+function drawMultilineTip(gfx: Gfx, list: (string | TipLine)[], x: number, y: number, sw: number, sh: number) {
+  if (!list.length) return;
+  const text = (s: string) => (s.endsWith(LINESPACE) ? s.slice(0, -LINESPACE.length) : s);
+  let w = 0;
+  let h = -2;
+  list.forEach((s, i) => {
+    if (typeof s === 'string') {
+      w = Math.max(w, stringWidth(text(s)));
+      h += s.endsWith(LINESPACE) && i + 1 < list.length ? 12 : 10;
+    } else {
+      w = Math.max(w, s.width);
+      h += s.height;
+    }
+  });
+  if (x < 8) x = 8;
+  else if (x > sw - w - 8) {
+    x -= 24 + w;
+    if (x < 8) x = 8;
+  }
+  y = Math.min(Math.max(y, 8), sh - 8 - h);
+  tooltipBox(gfx, x - 4, y - 4, w + 7, h + 7);
+  for (const s of list) {
+    if (typeof s === 'string') {
+      drawString(gfx, text(s), x, y, 0xffffffff, true);
+      y += s.endsWith(LINESPACE) ? 12 : 10;
+    } else {
+      s.draw(gfx, x, y);
+      y += s.height;
+    }
+  }
+}
+
+/** GuiDraw.drawTooltipBox with CodeChickenCore's default colours. */
+function tooltipBox(gfx: Gfx, x: number, y: number, w: number, h: number) {
+  const bg = 0xf0100010, b0 = 0x505000ff, b1 = 0x5028007f;
+  const r = (rx: number, ry: number, rw: number, rh: number, c0: number, c1: number) => gfx.gradient(rx, ry, rw, rh, c0 >>> 0, c1 >>> 0);
+  r(x + 1, y, w - 1, 1, bg, bg);
+  r(x + 1, y + h, w - 1, 1, bg, bg);
+  r(x + 1, y + 1, w - 1, h - 1, bg, bg);
+  r(x, y + 1, 1, h - 1, bg, bg);
+  r(x + w, y + 1, 1, h - 1, bg, bg);
+  r(x + 1, y + 2, 1, h - 3, b0, b1);
+  r(x + w - 1, y + 2, 1, h - 3, b0, b1);
+  r(x + 1, y + 1, w - 1, 1, b0, b0);
+  r(x + 1, y + h - 1, w - 1, 1, b1, b1);
 }
 
 const handlerMod = (h: NeiHandler) => (h.kind === 'gt' ? 'GregTech' : 'Minecraft');

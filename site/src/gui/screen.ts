@@ -103,6 +103,10 @@ export abstract class Screen {
   }
   /** Called after the screen is shown again (returning from a child screen). */
   resumed() {}
+  /** Draw what tooltip() returned. Screens that stand for another mod's GUI can draw it their way. */
+  drawTooltip(gfx: Gfx, lines: (string | TipLine)[], mx: number, my: number) {
+    drawHoveringText(gfx, lines, mx, my, this.width, this.height);
+  }
 }
 
 // ---------------------------------------------------------------- tooltips
@@ -387,17 +391,22 @@ export class Host {
     );
     window.addEventListener('keydown', (e) => {
       keys.shift = e.shiftKey;
+      keys.alt = e.altKey;
+      // Alt shows NEI's hotkey list; keep it from opening the browser's menu bar.
+      if (e.key === 'Alt') e.preventDefault();
       this.invalidate();
       if ((e.target as HTMLElement)?.closest?.('input,textarea,select')) return;
       if (this.screen?.key(e)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => {
       keys.shift = e.shiftKey;
+      keys.alt = e.altKey;
+      if (e.key === 'Alt') e.preventDefault();
       this.invalidate();
     });
     window.addEventListener('blur', () => {
       mouseButtons.fill(false);
-      keys.shift = false;
+      keys.shift = keys.alt = false;
       this.invalidate();
     });
 
@@ -498,7 +507,7 @@ export class Host {
     if (!s) return;
     s.draw(gfx, this.mx, this.my);
     const tt = this.mx >= 0 ? s.tooltip(this.mx, this.my) : null;
-    if (tt && tt.length) drawHoveringText(gfx, tt, this.mx, this.my, this.w, this.h);
+    if (tt && tt.length) s.drawTooltip(gfx, tt, this.mx, this.my);
     this.canvas.style.cursor = 'default';
   }
 }

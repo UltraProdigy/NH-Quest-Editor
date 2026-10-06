@@ -6,7 +6,7 @@ import { type Gfx } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
 import { animating } from '../gui/frame.ts';
 import type { NeiHandler, NeiRecipe, Slot } from './model.ts';
-import { itemIndexOf, fuelList as exportedFuels } from './data.ts';
+import { itemIndexOf, fuelList as exportedFuels, cycleTime } from './data.ts';
 import { gtSlots, drawGtBackground, drawGtForeground, gtRecipeHeight } from './gt.ts';
 
 /** A stack placed in a recipe, relative to the recipe's origin (PositionedStack). */
@@ -58,7 +58,7 @@ export function recipeSlots(h: NeiHandler, r: NeiRecipe, now: number): PlacedSlo
     case 'smelting': {
       if (r.i !== undefined) out.push({ x: 51, y: 6, slot: r.i, input: true });
       const f = fuelList();
-      if (f.length) out.push({ x: 51, y: 42, slot: f[Math.floor(ticks(now) / 48) % f.length], input: true, other: true });
+      if (f.length) out.push({ x: 51, y: 42, slot: f[Math.floor(ticks(cycleTime(now)) / 48) % f.length], input: true, other: true });
       if (r.o !== undefined) out.push({ x: 111, y: 24, slot: r.o, input: false });
       break;
     }
@@ -105,7 +105,7 @@ export function drawRecipeForeground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: n
     const tex = texture('minecraft:textures/gui/container/furnace.png');
     if (!tex) return;
     animating();
-    const t = ticks(now) % 48 / 48;
+    const t = ticks(cycleTime(now)) % 48 / 48;
     progressBar(gfx, tex, x + 51, y + 25, 176, 0, 14, 14, t, 7);
     progressBar(gfx, tex, x + 74, y + 23, 176, 14, 24, 16, t, 0);
   }
