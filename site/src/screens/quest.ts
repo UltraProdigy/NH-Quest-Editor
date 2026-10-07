@@ -1,6 +1,7 @@
 // A single quest: description, tasks and rewards (betterquesting.client.gui2.GuiQuest).
 
 import { Screen } from '../gui/screen.ts';
+import { openNeiInventory } from '../nei/inventoryScreen.ts';
 import { CanvasEmpty, Rect, Transform, Align, quickAnchor, type GuiRect, type Panel } from '../gui/core.ts';
 import { tex, col, icon, line as themeLine, ImageTexture } from '../gui/theme.ts';
 import {
@@ -36,6 +37,15 @@ export class QuestScreen extends Screen {
   title() {
     return this.q ? stripFormatting(this.q.name) : '';
   }
+  /** The inventory key (E) opens the inventory with NEI's item panel, as it would in game. */
+  key(e: KeyboardEvent) {
+    if (!this.popup && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'e') {
+      openNeiInventory(this);
+      return true;
+    }
+    return super.key(e);
+  }
+
   route() {
     return `#/quest/${shortId(this.questId)}`;
   }

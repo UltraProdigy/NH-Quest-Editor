@@ -8,6 +8,7 @@ import { fetchJson, resourceUrl, siteUrl } from './gui/assets.ts';
 import { textLinks, itemLookup } from './gui/widgets.ts';
 import { PopItemList } from './gui/popup.ts';
 import { openLookup, RecipeScreen, type RecipeMode } from './nei/recipeScreen.ts';
+import { NeiInventoryScreen } from './nei/inventoryScreen.ts';
 import { splitString, plainText, setForceMonochrome } from './gui/text.ts';
 import { loadQuestbook, quest as getQuest, fullId, linesContaining, view, questNbtFluid, type QuestState } from './store.ts';
 import { nbtFluidOf } from './nei/data.ts';
@@ -128,6 +129,13 @@ async function start() {
       lines.host = host;
       const ok = await openLookup(lines, arg, kind as RecipeMode, { handler: sub, page: Number(parts[3]) || undefined }, false);
       if (ok) return;
+    }
+    if (kind === 'nei') {
+      if (host.screen instanceof NeiInventoryScreen) return;
+      const lines = new QuestLinesScreen(null);
+      lines.host = host;
+      host.show(new NeiInventoryScreen(lines), false);
+      return;
     }
     if (kind === 'quest' && arg) {
       const id = fullId(arg);

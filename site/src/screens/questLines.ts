@@ -2,6 +2,7 @@
 // (betterquesting.client.gui2.GuiQuestLines).
 
 import { Screen } from '../gui/screen.ts';
+import { openNeiInventory } from '../nei/inventoryScreen.ts';
 import { Transform, Align, Rect, type Panel } from '../gui/core.ts';
 import { staticColor, pulseColor } from '../gui/color.ts';
 import { tex, col, icon, setShowDependencyArrows, showDependencyArrows } from '../gui/theme.ts';
@@ -63,6 +64,15 @@ export class QuestLinesScreen extends Screen {
 
   title() {
     return this.selectedLine ? stripFormatting(this.selectedLine.name) : '';
+  }
+
+  /** The inventory key (E) opens the inventory with NEI's item panel, as it would in game. */
+  key(e: KeyboardEvent) {
+    if (!this.popup && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'e') {
+      openNeiInventory(this);
+      return true;
+    }
+    return super.key(e);
   }
 
   route() {

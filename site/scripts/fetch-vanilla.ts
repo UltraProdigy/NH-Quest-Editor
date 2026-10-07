@@ -1,6 +1,7 @@
 // Downloads the Minecraft 1.7.10 client jar from Mojang and extracts the few vanilla assets the
-// site draws with (the bitmap font, the enchantment glint, and the button, crafting table and
-// furnace textures of the recipe views). They are not stored in this repository.
+// site draws with (the bitmap font, the enchantment glint, the button, crafting table and furnace
+// textures of the recipe views, and the inventory NEI's item panel opens over). They are not
+// stored in this repository.
 //
 // Usage: node scripts/fetch-vanilla.ts [out dir]   (default: public/assets/minecraft)
 // Needs `unzip` on the PATH.
@@ -41,7 +42,7 @@ execFileSync('unzip', [
   '-o', '-q', jarPath,
   'assets/minecraft/textures/font/*', 'assets/minecraft/font/*', 'assets/minecraft/textures/misc/enchanted_item_glint.png',
   'assets/minecraft/textures/gui/widgets.png', 'assets/minecraft/textures/gui/container/crafting_table.png',
-  'assets/minecraft/textures/gui/container/furnace.png',
+  'assets/minecraft/textures/gui/container/furnace.png', 'assets/minecraft/textures/gui/container/inventory.png',
   '-d', tmp,
 ]);
 execFileSync('cp', ['-r', join(tmp, 'assets/minecraft/textures'), join(tmp, 'assets/minecraft/font'), out]);
