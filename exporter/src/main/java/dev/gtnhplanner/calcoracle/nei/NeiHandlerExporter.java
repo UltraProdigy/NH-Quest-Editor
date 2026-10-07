@@ -691,7 +691,7 @@ public final class NeiHandlerExporter {
         }
     }
 
-    private static Iterable<?> iterable(Object value) {
+    static Iterable<?> iterable(Object value) {
         if (value == null) return Collections.emptyList();
         if (value instanceof Iterable) return (Iterable<?>) value;
         if (value.getClass().isArray()) {
@@ -702,7 +702,7 @@ public final class NeiHandlerExporter {
         return Collections.singletonList(value);
     }
 
-    private static Object field(Object target, String name) {
+    static Object field(Object target, String name) {
         if (target == null) return null;
         for (Class<?> c = target.getClass(); c != null; c = c.getSuperclass()) {
             try {
@@ -742,7 +742,7 @@ public final class NeiHandlerExporter {
         return v instanceof Number ? ((Number) v).intValue() : 0;
     }
 
-    private static Object staticField(String className, String name) {
+    static Object staticField(String className, String name) {
         try {
             for (Class<?> c = Class.forName(className); c != null; c = c.getSuperclass()) {
                 try {
@@ -758,7 +758,7 @@ public final class NeiHandlerExporter {
     }
 
     /** Calls a public or declared method by name and argument count (first one that accepts the arguments). */
-    private static Object call(Object target, String name, Object... args) {
+    static Object call(Object target, String name, Object... args) {
         if (target == null) return null;
         for (Class<?> c = target.getClass(); c != null; c = c.getSuperclass()) {
             for (Method m : c.getDeclaredMethods()) {
@@ -783,7 +783,7 @@ public final class NeiHandlerExporter {
         return null;
     }
 
-    private static Object callStatic(String className, String name, Object... args) {
+    static Object callStatic(String className, String name, Object... args) {
         try {
             for (Method m : Class.forName(className).getMethods()) {
                 if (!m.getName().equals(name) || m.getParameterTypes().length != args.length || !Modifier.isStatic(m.getModifiers())) {

@@ -333,6 +333,37 @@ public final class GtnhCalcOracleExporter {
         } catch (Throwable t) {
             adapters.add(adapter("nei-handlers", "missing", true, 0, 0, started, t.toString()));
         }
+
+        // NEI's item list, for the site's item panel and search. Read on this thread: NEI builds and
+        // reads it on its own worker threads too.
+        long listStarted = System.currentTimeMillis();
+        try {
+            dev.gtnhplanner.calcoracle.nei.NeiItemListExporter list = new dev.gtnhplanner.calcoracle.nei.NeiItemListExporter(
+                new dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.Resources() {
+                    @Override
+                    public Map<String, Object> item(ItemStack stack) {
+                        return itemStack(stack);
+                    }
+                }
+            );
+            Map<String, Object> exported = list.export(10L * 60L * 1000L);
+            domain.put("itemList", exported);
+            int count = listFrom(exported.get("items")).size();
+            adapters.add(
+                adapter(
+                    "nei-item-list",
+                    list.warnings.isEmpty() ? "computed" : "partial",
+                    true,
+                    count,
+                    0,
+                    listStarted,
+                    list.warnings.isEmpty() ? null : join(list.warnings, "; ")
+                )
+            );
+        } catch (Throwable t) {
+            adapters.add(adapter("nei-item-list", "missing", true, 0, 0, listStarted, t.toString()));
+        }
+
         return domain;
     }
 
