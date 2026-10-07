@@ -20,6 +20,8 @@ import {
 import { recipeSlots, recipeHeight, drawRecipeBackground, drawRecipeForeground, type PlacedSlot } from './handlers.ts';
 import { drawSlotBadge, drawFluidAmount } from './gt.ts';
 import type { NeiHandler } from './model.ts';
+import { Btn, type Rect, inside, nineSlice, guiButton, neiButton, drawMultilineTip, hotkeyLines, LINESPACE } from './draw.ts';
+import { ItemPanelOverlay, addToHistory } from './itemPanel.ts';
 
 export type RecipeMode = 'recipe' | 'usage';
 
@@ -29,10 +31,6 @@ const MAX_HEIGHT = 370;
 const BUTTON_W = 13, BUTTON_H = 12;
 const BORDER = 5, TRANSPARENCY = 4;
 
-const enum Btn { DISABLED = 0, NORMAL = 1, HOVER = 2 }
-
-interface Rect { x: number; y: number; w: number; h: number }
-const inside = (r: Rect, mx: number, my: number) => mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
 
 /** Where a recipe widget sits on the current page. */
 interface Placed { recipe: number; x: number; y: number; h: number }
@@ -50,6 +48,8 @@ export class RecipeScreen extends Screen {
   private gt = 0;
   private ySize = 0;
   private pages: number[][] = [];
+  /** NEI's item panel and search around the window. */
+  private overlay = new ItemPanelOverlay((key, mode) => this.open(this, key, mode));
 
   constructor(
     parent: Screen | null,
@@ -98,6 +98,13 @@ export class RecipeScreen extends Screen {
     this.gl = Math.floor((W - X_SIZE) / 2);
     this.gt = Math.max(22 - 3 + TAB, Math.floor((H - this.ySize) / 2));
     this.paginate();
+    // GuiRecipe.hideItemPanelSlot: no item panel slot under the window (tabs included) or the
+    // catalysts.
+    const cat = this.catalysts();
+    this.overlay.layout(W, H, { x: this.gl, y: this.gt, w: X_SIZE, h: this.ySize }, [
+      { x: this.gl, y: this.gt - TAB, w: X_SIZE, h: this.ySize + TAB },
+      ...(cat ? [cat.rect] : []),
+    ]);
   }
 
   /** RecipePageManager.rebuildPages: as many recipe widgets per page as fit (at least one). */
@@ -241,7 +248,7 @@ export class RecipeScreen extends Screen {
         if (!rec) continue;
         const ox = p.x, oy = p.y + h.yShift;
         for (const ps of recipeSlots(h, rec, performance.now())) {
-          if (inside({ x: ox + ps.x, y: oy + ps.y, w: 16, h: 16 }, mx, my)) {
+          if (inside({ x: ox + ps.x, y: oy + ps.y, w: ps.w ?? 16, h: ps.h ?? 16 }, mx, my)) {
             const item = slotItem(ps.slot, performance.now());
             if (item >= 0) return { item, ps, h, px: ox + ps.x, py: oy + ps.y };
           }
@@ -263,6 +270,7 @@ export class RecipeScreen extends Screen {
     this.drawTabs(gfx, mx, my);
     this.drawRecipes(gfx, mx, my, now);
     this.drawCatalysts(gfx, mx, my);
+    this.overlay.draw(gfx, mx, my);
   }
 
   /** recipebg.png as a nine-slice with the window's 5 px border (plus 4 px of transparency). */
@@ -340,6 +348,10 @@ export class RecipeScreen extends Screen {
         const o = typeof ps.slot === 'object' ? ps.slot : null;
         const n = slotAmount(ps.slot);
         const x = ox + ps.x, y = oy + ps.y;
+        if (ps.hidden) {
+          if (inside({ x, y, w: ps.w ?? 16, h: ps.h ?? 16 }, mx, my)) gfx.fill(x, y, ps.w ?? 16, ps.h ?? 16, 0x80ffffff);
+          continue;
+        }
         if (item >= 0) {
           const fluid = ps.fluid || itemKeyAt(item).startsWith('fluid:');
           drawNeiItem(gfx, item, x, y, !fluid && n > 1 ? String(n) : '');
@@ -396,6 +408,7 @@ export class RecipeScreen extends Screen {
   // ---------------------------------------------------------------- input
 
   mouseDown(mx: number, my: number, b: number) {
+    if (this.overlay.mouseDown(mx, my, b)) return true;
     if (b !== 0 && b !== 1) return true;
     const hit = this.hovered(mx, my);
     if (hit) {
@@ -424,7 +437,8 @@ export class RecipeScreen extends Screen {
     }
     return true;
   }
-  mouseUp() {
+  mouseUp(mx: number, my: number, b: number) {
+    this.overlay.mouseUp(mx, my, b);
     return true;
   }
 
@@ -437,6 +451,7 @@ export class RecipeScreen extends Screen {
   }
 
   scroll(mx: number, my: number, d: number) {
+    if (this.overlay.scroll(mx, my, d)) return true;
     // Shift + scroll over a cycling stack shows its next or previous item (RecipeWidget.onMouseWheel).
     if (heldKeys.shift) {
       const hit = this.hovered(mx, my);
@@ -459,6 +474,8 @@ export class RecipeScreen extends Screen {
   }
 
   key(e: KeyboardEvent) {
+    const [lmx, lmy] = this.lastMouse ?? [-1, -1];
+    if (this.overlay.key(e, lmx, lmy)) return true;
     const k = e.key.toLowerCase();
     if (e.key === 'Escape') {
       // Escape closes every recipe screen at once (NEI returns to the first GUI).
@@ -475,8 +492,9 @@ export class RecipeScreen extends Screen {
     }
     if ((k === 'r' || k === 'u') && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const hit = this.lastMouse ? this.hovered(this.lastMouse[0], this.lastMouse[1]) : null;
-      if (hit) {
-        this.open(this, itemKeyAt(hit.item), k === 'r' ? 'recipe' : 'usage');
+      const item = hit?.item ?? this.overlay.hoveredItem(lmx, lmy);
+      if (item !== null && item !== undefined) {
+        this.open(this, itemKeyAt(item), k === 'r' ? 'recipe' : 'usage');
         return true;
       }
     }
@@ -491,6 +509,8 @@ export class RecipeScreen extends Screen {
 
   tooltip(mx: number, my: number): Tooltip {
     this.lastMouse = [mx, my];
+    const panelTip = this.overlay.tooltip(mx, my);
+    if (panelTip) return panelTip;
     const hit = this.hovered(mx, my);
     if (hit) {
       const lines: (string | TipLine)[] = itemTooltipLines(hit.item);
@@ -503,6 +523,7 @@ export class RecipeScreen extends Screen {
       }
       const alts = hit.ps ? slotItems(hit.ps.slot) : [];
       const cycling = new Set(alts).size > 1;
+      if (hit.ps?.tip) lines.push(...hit.ps.tip);
       if (cycling) lines.push(acceptsFollowing(alts, hit.item));
       // GuiContainerManager.renderToolTips: the hotkeys (or how to show them) under the name, and a
       // gap after the name.
@@ -566,154 +587,12 @@ export function acceptsFollowing(list: number[], active: number): TipLine {
   };
 }
 
-/** CodeChickenLib's GuiDraw.TOOLTIP_LINESPACE: a line ending in it is followed by a 2 px gap. */
-const LINESPACE = '\u00a7h';
-
-/**
- * The hotkeys NEI lists for a stack in the recipe window, as far as the site has them: with Alt
- * held the list (GuiContainerManager.collectHotkeyTips), otherwise how to show it.
- */
-function hotkeyLines(cycling: boolean): string[] {
-  if (!heldKeys.alt) return ['§7Hold §6ALT§7 for hotkeys'];
-  const tips: [string, string][] = [
-    ['R', 'Recipe to make this item'],
-    ['U', 'Recipes that use this item'],
-  ];
-  if (cycling) tips.push(['SHIFT + Scroll', 'Change Item']);
-  tips.sort((a, b) => a[0].length - b[0].length || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-  const out = tips.map(([k, m]) => `§6${k}§8 - §7${m}§r`);
-  out[out.length - 1] += LINESPACE;
-  return out;
-}
-
-/**
- * CodeChickenLib's GuiDraw.drawMultilineTip, which NEI draws its tooltips with: no wrapping, 10 px
- * lines (12 after a LINESPACE), drawn code lines at their own size, flipped to the cursor's left
- * when it would leave the screen.
- */
-function drawMultilineTip(gfx: Gfx, list: (string | TipLine)[], x: number, y: number, sw: number, sh: number) {
-  if (!list.length) return;
-  const text = (s: string) => (s.endsWith(LINESPACE) ? s.slice(0, -LINESPACE.length) : s);
-  let w = 0;
-  let h = -2;
-  list.forEach((s, i) => {
-    if (typeof s === 'string') {
-      w = Math.max(w, stringWidth(text(s)));
-      h += s.endsWith(LINESPACE) && i + 1 < list.length ? 12 : 10;
-    } else {
-      w = Math.max(w, s.width);
-      h += s.height;
-    }
-  });
-  if (x < 8) x = 8;
-  else if (x > sw - w - 8) {
-    x -= 24 + w;
-    if (x < 8) x = 8;
-  }
-  y = Math.min(Math.max(y, 8), sh - 8 - h);
-  tooltipBox(gfx, x - 4, y - 4, w + 7, h + 7);
-  for (const s of list) {
-    if (typeof s === 'string') {
-      drawString(gfx, text(s), x, y, 0xffffffff, true);
-      y += s.endsWith(LINESPACE) ? 12 : 10;
-    } else {
-      s.draw(gfx, x, y);
-      y += s.height;
-    }
-  }
-}
-
-/** GuiDraw.drawTooltipBox with CodeChickenCore's default colours. */
-function tooltipBox(gfx: Gfx, x: number, y: number, w: number, h: number) {
-  const bg = 0xf0100010, b0 = 0x505000ff, b1 = 0x5028007f;
-  const r = (rx: number, ry: number, rw: number, rh: number, c0: number, c1: number) => gfx.gradient(rx, ry, rw, rh, c0 >>> 0, c1 >>> 0);
-  r(x + 1, y, w - 1, 1, bg, bg);
-  r(x + 1, y + h, w - 1, 1, bg, bg);
-  r(x + 1, y + 1, w - 1, h - 1, bg, bg);
-  r(x, y + 1, 1, h - 1, bg, bg);
-  r(x + w, y + 1, 1, h - 1, bg, bg);
-  r(x + 1, y + 2, 1, h - 3, b0, b1);
-  r(x + w - 1, y + 2, 1, h - 3, b0, b1);
-  r(x + 1, y + 1, w - 1, 1, b0, b0);
-  r(x + 1, y + h - 1, w - 1, 1, b1, b1);
-}
-
 const handlerMod = (h: NeiHandler) => (h.kind === 'gt' ? 'GregTech' : 'Minecraft');
 
 /** NEIClientUtils.formatChance. */
 export function formatChance(c: number) {
   const pct = c / 100;
   return `${Number.isInteger(pct) ? pct : Number(pct.toFixed(2))}%`;
-}
-
-// ---------------------------------------------------------------- NEI drawing helpers
-
-/**
- * DrawableResource.draw with slices: corners as they are, edges and middle tiled. (u, v, tw, th)
- * is the source in texture units and `k` texture pixels per unit.
- */
-function nineSlice(
-  gfx: Gfx, img: CanvasImageSource, u: number, v: number, tw: number, th: number, k: number,
-  x: number, y: number, w: number, h: number, b: number,
-) {
-  const mw = tw - 2 * b, mh = th - 2 * b;
-  const iw = w - 2 * b, ih = h - 2 * b;
-  if (mw <= 0 || mh <= 0 || iw <= 0 || ih <= 0) return;
-  const blit = (sx: number, sy: number, sw: number, sh: number, dx: number, dy: number) =>
-    gfx.image(img, (u + sx) * k, (v + sy) * k, sw * k, sh * k, dx, dy, sw, sh);
-  for (let ox = 0; ox < iw; ox += mw) {
-    const cw = Math.min(mw, iw - ox);
-    for (let oy = 0; oy < ih; oy += mh) blit(b, b, cw, Math.min(mh, ih - oy), x + b + ox, y + b + oy);
-    blit(b, 0, cw, b, x + b + ox, y);
-    blit(b, b + mh, cw, b, x + b + ox, y + b + ih);
-  }
-  for (let oy = 0; oy < ih; oy += mh) {
-    const ch = Math.min(mh, ih - oy);
-    blit(0, b, b, ch, x, y + b + oy);
-    blit(b + mw, b, b, ch, x + b + iw, y + b + oy);
-  }
-  blit(0, 0, b, b, x, y);
-  blit(b + mw, 0, b, b, x + b + iw, y);
-  blit(0, b + mh, b, b, x, y + b + ih);
-  blit(b + mw, b + mh, b, b, x + b + iw, y + b + ih);
-}
-
-/** GuiNEIButton: four corners of a widgets.png button, at most w/2 x h/2 each, and a centred label. */
-function guiButton(gfx: Gfx, r: Rect, label: string, state: Btn) {
-  const img = texture('minecraft:textures/gui/widgets.png');
-  if (img) {
-    const k = img.width / 256;
-    const v = 46 + state * 20;
-    const hw = Math.trunc(r.w / 2), hh = Math.trunc(r.h / 2);
-    gfx.image(img, 0, v * k, hw * k, hh * k, r.x, r.y, hw, hh);
-    gfx.image(img, (200 - hw) * k, v * k, hw * k, hh * k, r.x + hw, r.y, hw, hh);
-    gfx.image(img, 0, (v + 20 - hh) * k, hw * k, hh * k, r.x, r.y + hh, hw, hh);
-    gfx.image(img, (200 - hw) * k, (v + 20 - hh) * k, hw * k, hh * k, r.x + hw, r.y + hh, hw, hh);
-  }
-  if (label) {
-    const color = state === Btn.DISABLED ? 0xffa0a0a0 : state === Btn.HOVER ? 0xffffffa0 : 0xffe0e0e0;
-    drawString(gfx, label, r.x + Math.trunc(r.w / 2) - Math.trunc(stringWidth(label) / 2), r.y + Math.trunc((r.h - 8) / 2), color, true);
-  }
-}
-
-/** LayoutManager.drawButtonBackground with edges (nei.Button), and an optional label. */
-function neiButton(gfx: Gfx, r: Rect, state: Btn, label = '') {
-  const img = texture('minecraft:textures/gui/widgets.png');
-  if (img) {
-    const k = img.width / 256;
-    const ty = 46 + state * 20;
-    const w1 = Math.trunc(r.w / 2), h1 = Math.trunc(r.h / 2), w2 = Math.trunc((r.w + 1) / 2), h2 = Math.trunc((r.h + 1) / 2);
-    const x2 = r.x + r.w - w2, y2 = r.y + r.h - h2;
-    const ty2 = ty + 20 - h2, tx2 = 200 - w2;
-    gfx.image(img, 0, ty * k, w1 * k, h1 * k, r.x, r.y, w1, h1);
-    gfx.image(img, 0, ty2 * k, w1 * k, h2 * k, r.x, y2, w1, h2);
-    gfx.image(img, tx2 * k, ty * k, w2 * k, h1 * k, x2, r.y, w2, h1);
-    gfx.image(img, tx2 * k, ty2 * k, w2 * k, h2 * k, x2, y2, w2, h2);
-  }
-  if (label) {
-    const color = state === Btn.HOVER ? 0xffffffa0 : state === Btn.DISABLED ? 0xff601010 : 0xffe0e0e0;
-    drawString(gfx, label, r.x + Math.trunc(r.w / 2) - Math.trunc(stringWidth(label) / 2), r.y + Math.trunc((r.h - 8) / 2), color, true);
-  }
 }
 
 // ---------------------------------------------------------------- opening
@@ -724,6 +603,8 @@ export async function openLookup(
 ): Promise<boolean> {
   const list = mode === 'recipe' ? await recipesFor(key) : await usagesFor(key);
   if (!list.length) return false;
+  const item = itemIndexOf(key);
+  if (item !== undefined) addToHistory(item);
   const screen = new RecipeScreen(from, mode, key, list, (s, k, m) => void openLookup(s, k, m), start);
   from.host.show(screen, push);
   return true;

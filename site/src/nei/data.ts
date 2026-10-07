@@ -6,7 +6,7 @@ import { type Gfx, keys as heldKeys } from '../gui/core.ts';
 import { animating, invalidate } from '../gui/frame.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import { drawItemKey, itemInfo } from '../gui/items.ts';
-import type { NeiItems, NeiHandlers, NeiHandler, NeiRecipe, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj } from './model.ts';
+import type { NeiItems, NeiHandlers, NeiHandler, NeiRecipe, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiList, NeiTooltips } from './model.ts';
 import { shardOf } from './model.ts';
 
 const DIR = 'data/nei/';
@@ -14,6 +14,7 @@ const DIR = 'data/nei/';
 let items: NeiItems | null = null;
 let handlers: NeiHandler[] = [];
 let fuels: number[] = [];
+let pics: [number, number, number, number][] = [];
 let keyIndex = new Map<string, number>();
 /** Ore names each item belongs to (only names some recipe uses). */
 let oreOf = new Map<number, number[]>();
@@ -30,6 +31,7 @@ export function loadNei(): Promise<boolean> {
       items = it;
       handlers = hs.handlers;
       fuels = hs.fuels ?? [];
+      pics = hs.pics ?? [];
       keyIndex = new Map(it.keys.map((k, i) => [k, i]));
       oreOf = new Map();
       it.ore.forEach(([, members], o) => {
@@ -57,6 +59,51 @@ export const itemKeyAt = (i: number) => items?.keys[i] ?? '';
 export const itemIndexOf = (key: string) => keyIndex.get(key) ?? keyIndex.get(key.replace(/#.*$/, ''));
 export const oreName = (o: number) => items?.ore[o]?.[0] ?? '';
 export const oreMembers = (o: number) => items?.ore[o]?.[1] ?? [];
+
+/** Draw a generic handler's picture with the recipe's origin at (x, y). */
+export function picture(gfx: Gfx, n: number, x: number, y: number) {
+  const p = pics[n];
+  if (!p || !p[2]) return;
+  const img = image(siteUrl(`${DIR}pictures/${n}.png`));
+  if (img) gfx.image(img, 0, 0, p[2], p[3], x + p[0], y + p[1], p[2], p[3]);
+}
+
+// ---------------------------------------------------------------- NEI's item list
+
+let list: NeiList | null = null;
+let listLoading: Promise<NeiList | null> | null = null;
+/** NEI's item list (list.json); null when the data has none (older exports). */
+export function loadList(): Promise<NeiList | null> {
+  listLoading ??= (async () => {
+    if (!(await loadNei())) return null;
+    try {
+      list = await fetchJson<NeiList>(siteUrl(DIR + 'list.json'));
+    } catch {
+      list = null;
+    }
+    invalidate();
+    return list;
+  })();
+  return listLoading;
+}
+export const itemList = () => list;
+
+let tooltips: NeiTooltips | null = null;
+let tooltipsLoading: Promise<NeiTooltips | null> | null = null;
+/** The item list's tooltips, rarities and ore names (tooltips.json), loaded on first use. */
+export function loadTooltips(): Promise<NeiTooltips | null> {
+  tooltipsLoading ??= (async () => {
+    try {
+      tooltips = await fetchJson<NeiTooltips>(siteUrl(DIR + 'tooltips.json'));
+    } catch {
+      tooltips = null;
+    }
+    invalidate();
+    return tooltips;
+  })();
+  return tooltipsLoading;
+}
+export const tooltipData = () => tooltips;
 
 // ---------------------------------------------------------------- index lookups
 
@@ -238,12 +285,23 @@ export function itemMod(i: number): string | null {
   return m >= 0 ? (items.modNames[m] ?? null) : null;
 }
 
+/**
+ * An item's tooltip as NEI shows it (GuiContainerManager.itemDisplayNameMultiline): the name in its
+ * rarity colour, the lines the item adds in gray, and the mod name (Waila). The lines come with
+ * tooltips.json, which loads on first use.
+ */
 export function itemTooltipLines(i: number): string[] {
-  const out = [itemName(i)];
+  if (!tooltips) void loadTooltips();
+  const rarity = tooltips?.rarity[i];
+  const out = [(rarity ? `§${rarity}` : '') + itemName(i)];
+  for (const l of tooltips?.lines[i] ?? []) out.push(l.startsWith(TOOLTIP_HANDLER) ? l : `§7${l}§r`);
   const mod = itemMod(i);
   if (mod) out.push(`§9§o${mod}`);
   return out;
 }
+
+/** GuiDraw.TOOLTIP_HANDLER: lines starting with it are drawn by code, not as text. */
+const TOOLTIP_HANDLER = '\u00a7x';
 
 /** Draw item i into a 16x16 slot at (x, y), with an optional stack-size label. */
 export function drawNeiItem(gfx: Gfx, i: number, x: number, y: number, label = '') {

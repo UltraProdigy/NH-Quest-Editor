@@ -6,7 +6,8 @@ import { type Gfx } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
 import { animating } from '../gui/frame.ts';
 import type { NeiHandler, NeiRecipe, Slot } from './model.ts';
-import { itemIndexOf, fuelList as exportedFuels, cycleTime } from './data.ts';
+import { itemIndexOf, fuelList as exportedFuels, cycleTime, picture } from './data.ts';
+import { drawString } from '../gui/font.ts';
 import { gtSlots, drawGtBackground, drawGtForeground, gtRecipeHeight } from './gt.ts';
 
 /** A stack placed in a recipe, relative to the recipe's origin (PositionedStack). */
@@ -19,6 +20,13 @@ export interface PlacedSlot {
   fluid?: boolean;
   /** A stack the handler shows that is not part of the recipe (furnace fuel). */
   other?: boolean;
+  /** Size of the stack's area when not 16 x 16 (generic handlers' tanks and the like). */
+  w?: number;
+  h?: number;
+  /** The handler draws this stack itself (it is in its picture), so no item is drawn. */
+  hidden?: boolean;
+  /** Extra tooltip lines the handler gives the stack. */
+  tip?: string[];
 }
 
 /** TemplateRecipeHandler.cycleticks: one tick per 50 ms. */
@@ -65,8 +73,35 @@ export function recipeSlots(h: NeiHandler, r: NeiRecipe, now: number): PlacedSlo
     case 'gt':
       out.push(...gtSlots(h, r));
       break;
+    case 'generic':
+      // PositionedStack.draw centres a 16 px item in the stack's area.
+      for (const p of r.ps ?? []) {
+        const w = p.w ?? 16, hh = p.h ?? 16;
+        out.push({
+          x: p.x + Math.trunc((w - 16) / 2), y: p.y + Math.trunc((hh - 16) / 2), slot: p.s, input: p.r === 0, other: p.r === 2,
+          ...(w !== 16 || hh !== 16 ? { w, h: hh, x: p.x, y: p.y } : {}),
+          ...(p.d ? { hidden: true } : {}),
+          ...(p.tip ? { tip: p.tip } : {}),
+        });
+      }
+      break;
   }
   return out;
+}
+
+/**
+ * A generic handler's picture and text of one layer (0: drawBackground, 1: drawForeground), as the
+ * exporter captured them at GUI scale 1.
+ */
+function drawGenericLayer(gfx: Gfx, r: NeiRecipe, x: number, y: number, layer: 0 | 1) {
+  const pic = layer === 0 ? r.bg : r.fg;
+  if (pic !== undefined) picture(gfx, pic, x, y);
+  for (const [text, tx, ty, color, shadow, l] of r.tx ?? []) {
+    if (l !== layer) continue;
+    // FontRenderer.drawString: a colour without alpha bits is drawn opaque.
+    const c = (color & 0xfc000000) === 0 ? (color | 0xff000000) >>> 0 : color >>> 0;
+    drawString(gfx, text, x + tx, y + ty, c, !!shadow);
+  }
 }
 
 /** Height of one recipe (IRecipeHandler.getRecipeHeight), without the handler's yShift. */
@@ -94,6 +129,7 @@ function progressBar(
 /** drawBackground: the handler's texture behind the stacks. */
 export function drawRecipeBackground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: number, now: number) {
   if (h.kind === 'gt') return drawGtBackground(gfx, h, r, x, y, now);
+  if (h.kind === 'generic') return drawGenericLayer(gfx, r, x, y, 0);
   const tex = texture(h.kind === 'smelting' ? 'minecraft:textures/gui/container/furnace.png' : 'minecraft:textures/gui/container/crafting_table.png');
   if (tex) gfx.image(tex, 5, 11, 166, 65, x, y, 166, 65);
 }
@@ -101,6 +137,7 @@ export function drawRecipeBackground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: n
 /** drawForeground/drawExtras: animations and text over the stacks. */
 export function drawRecipeForeground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: number, now: number) {
   if (h.kind === 'gt') return drawGtForeground(gfx, h, r, x, y, now);
+  if (h.kind === 'generic') return drawGenericLayer(gfx, r, x, y, 1);
   if (h.kind === 'smelting') {
     const tex = texture('minecraft:textures/gui/container/furnace.png');
     if (!tex) return;
