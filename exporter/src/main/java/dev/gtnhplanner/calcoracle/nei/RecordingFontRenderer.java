@@ -19,11 +19,15 @@ public final class RecordingFontRenderer extends FontRenderer {
         public final String text;
         public final int x;
         public final int y;
+        public final int color;
+        public final boolean shadow;
 
-        Line(String text, int x, int y) {
+        Line(String text, int x, int y, int color, boolean shadow) {
             this.text = text;
             this.x = x;
             this.y = y;
+            this.color = color;
+            this.shadow = shadow;
         }
     }
 
@@ -37,24 +41,36 @@ public final class RecordingFontRenderer extends FontRenderer {
 
     @Override
     public int drawString(String text, int x, int y, int color) {
-        return record(text, x, y);
+        return record(text, x, y, color, false);
     }
 
     @Override
     public int drawString(String text, int x, int y, int color, boolean shadow) {
-        return record(text, x, y);
+        return record(text, x, y, color, shadow);
     }
 
     @Override
     public int drawStringWithShadow(String text, int x, int y, int color) {
-        return record(text, x, y);
+        return record(text, x, y, color, true);
     }
 
-    private int record(String text, int x, int y) {
-        if (text != null) {
-            lines.add(new Line(text, x, y));
+    /** FontRenderer.drawSplitString: the wrapped lines, FONT_HEIGHT apart. */
+    @Override
+    public void drawSplitString(String text, int x, int y, int width, int color) {
+        if (text == null) {
+            return;
         }
-        return x + getStringWidth(text);
+        for (Object line : real.listFormattedStringToWidth(text, width)) {
+            record(String.valueOf(line), x, y, color, false);
+            y += FONT_HEIGHT;
+        }
+    }
+
+    private int record(String text, int x, int y, int color, boolean shadow) {
+        if (text != null) {
+            lines.add(new Line(text, x, y, color, shadow));
+        }
+        return x + getStringWidth(text) + (shadow ? 1 : 0);
     }
 
     @Override

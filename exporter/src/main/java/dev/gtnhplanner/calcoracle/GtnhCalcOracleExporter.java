@@ -364,7 +364,89 @@ public final class GtnhCalcOracleExporter {
             adapters.add(adapter("nei-item-list", "missing", true, 0, 0, listStarted, t.toString()));
         }
 
+        exportNeiGeneric(domain, adapters);
         return domain;
+    }
+
+    /**
+     * The recipe tabs the site has no port of, captured the same way for all of them (stacks, text
+     * and pictures of what each handler draws; see NeiGenericCapture). One handler at a time on the
+     * client thread, so the game keeps ticking in between.
+     */
+    @SuppressWarnings("unchecked")
+    private void exportNeiGeneric(Map<String, Object> domain, List<Map<String, Object>> adapters) {
+        long started = System.currentTimeMillis();
+        try {
+            final dev.gtnhplanner.calcoracle.nei.NeiGenericCapture capture = new dev.gtnhplanner.calcoracle.nei.NeiGenericCapture(
+                new dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.Resources() {
+                    @Override
+                    public Map<String, Object> item(ItemStack stack) {
+                        return itemStack(stack);
+                    }
+                }
+            );
+            final List<ItemStack> itemList = new ArrayList<ItemStack>();
+            Object items = readStaticField(Class.forName("codechicken.nei.ItemList"), "items");
+            if (items instanceof List) {
+                for (Object o : new ArrayList<Object>((List<Object>) items)) {
+                    if (o instanceof ItemStack) itemList.add((ItemStack) o);
+                }
+            }
+            List<Object[]> todo = ClientThread.call(
+                new java.util.concurrent.Callable<List<Object[]>>() {
+                    @Override
+                    public List<Object[]> call() {
+                        return dev.gtnhplanner.calcoracle.nei.NeiGenericCapture.handlersToCapture();
+                    }
+                },
+                5
+            );
+            long budget = Long.getLong("gtnh.oracle.neiGenericMinutes", 40L).longValue() * 60L * 1000L;
+            long perHandler = Long.getLong("gtnh.oracle.neiGenericHandlerSeconds", 180L).longValue() * 1000L;
+            List<Object> handlers = new ArrayList<Object>();
+            int recipes = 0;
+            for (final Object[] entry : todo) {
+                long left = started + budget - System.currentTimeMillis();
+                if (left <= 0) {
+                    capture.warnings.add("time budget used up; " + (todo.size() - handlers.size()) + " handlers left out");
+                    break;
+                }
+                final long handlerBudget = Math.min(perHandler, left);
+                try {
+                    Map<String, Object> h = ClientThread.call(
+                        new java.util.concurrent.Callable<Map<String, Object>>() {
+                            @Override
+                            public Map<String, Object> call() {
+                                return capture.capture(((Integer) entry[0]).intValue(), entry[1], itemList, handlerBudget);
+                            }
+                        },
+                        handlerBudget / 60000L + 5
+                    );
+                    recipes += listFrom(h.get("recipes")).size();
+                    handlers.add(h);
+                } catch (Throwable t) {
+                    capture.warnings.add(entry[1].getClass().getName() + ": " + t);
+                }
+            }
+            Map<String, Object> generic = new LinkedHashMap<String, Object>();
+            generic.put("items", capture.items);
+            generic.put("images", capture.images);
+            generic.put("handlers", handlers);
+            domain.put("generic", generic);
+            adapters.add(
+                adapter(
+                    "nei-generic",
+                    capture.warnings.isEmpty() ? "computed" : "partial",
+                    true,
+                    handlers.size(),
+                    recipes,
+                    started,
+                    capture.warnings.isEmpty() ? null : join(capture.warnings, "; ")
+                )
+            );
+        } catch (Throwable t) {
+            adapters.add(adapter("nei-generic", "missing", true, 0, 0, started, t.toString()));
+        }
     }
 
     private Map<String, Object> exportCrafting(List<Map<String, Object>> adapters) {
