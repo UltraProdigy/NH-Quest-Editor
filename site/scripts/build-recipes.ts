@@ -2,6 +2,7 @@
 // (exporter/, format dev.gtnhplanner.oracle.v1).
 //
 // Usage: node scripts/build-recipes.ts <export.json[.gz]> <icons dir> [out dir] [--ordering <handlerordering.csv>]
+//   [--pictures <dir>]  (the generic handlers' pictures; default: <icons dir>/../nei-layouts/handlers)
 //
 // Output, all loaded on demand by the site (src/nei/data.ts):
 // - items.json: every item, fluid and ore dictionary name the recipes mention. Items are numbered;
@@ -14,6 +15,10 @@
 //   sharded by a hash of the key.
 // - icons/<n>.png: the item icons, shrunk to the smallest size that loses nothing and packed into
 //   512 px sheets (16x16 icons of 32 px, 8x8 of 64 px, and so on).
+// - list.json: NEI's item list in its order with its collapsible groups (newer exports only).
+// - tooltips.json: the item list's tooltips, for the item panel's tooltips and NEI's search.
+// - pictures/<n>.png: what the generically captured handlers draw (backgrounds, foregrounds),
+//   cropped to what was drawn.
 //
 // See src/nei/model.ts for the shapes.
 
@@ -36,6 +41,7 @@ const flag = (name: string) => {
   return v;
 };
 const orderingArg = flag('--ordering');
+const picturesArg = flag('--pictures');
 const [exportArg, iconsArg, outArg] = args;
 if (!exportArg || !iconsArg) {
   console.error('Usage: node scripts/build-recipes.ts <export.json[.gz]> <icons dir> [out dir] [--ordering <csv>]');
@@ -43,6 +49,7 @@ if (!exportArg || !iconsArg) {
 }
 const outDir = resolve(outArg ?? 'public/data/nei');
 const iconsDir = resolve(iconsArg);
+const picturesDir = resolve(picturesArg ?? join(iconsDir, '..', 'nei-layouts', 'handlers'));
 const WILDCARD = 32767;
 
 // ---------------------------------------------------------------- export shapes
@@ -87,6 +94,55 @@ interface NeiExport {
   recipes?: number[];
   lines?: string[][];
   layout?: GtLayout;
+}
+
+/** NEI's item list (domain "nei", itemList). */
+interface ListItemExport extends Res {
+  group?: number;
+  hidden?: boolean;
+  tooltip?: string[];
+  rarity?: string;
+}
+interface ListExport {
+  groups?: { name?: string; expanded?: boolean }[];
+  items?: ListItemExport[];
+}
+
+/** A generically captured handler (domain "nei", generic): see exporter NeiGenericCapture. */
+interface GenericStackExport {
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+  /** 0 ingredient, 1 result, 2 other. */
+  r: number;
+  i?: number[];
+  a?: number;
+  c?: number;
+  tip?: string[];
+  d?: number;
+}
+type GenericText = [text: string, x: number, y: number, color: number, shadow: number, layer: number];
+interface GenericRecipeExport {
+  s?: GenericStackExport[];
+  t?: GenericText[];
+  bg?: number;
+  fg?: number;
+  for?: number[];
+}
+interface GenericHandlerExport {
+  index: number;
+  size?: [number, number];
+  margin?: number;
+  mode?: string;
+  status?: string;
+  truncated?: boolean;
+  recipes?: GenericRecipeExport[];
+}
+interface GenericExport {
+  items?: Res[];
+  images?: string[];
+  handlers?: GenericHandlerExport[];
 }
 
 // ---------------------------------------------------------------- items
@@ -169,7 +225,15 @@ type KRecipe =
   | { t: 'shaped'; w: number; g: (KSlot | null)[]; o: KSlot }
   | { t: 'shapeless'; g: KSlot[]; o: KSlot }
   | { t: 'smelting'; i: KSlot; o: KSlot }
-  | { t: 'gt'; e: number; d: number; s: number; ii: KSlot[]; io: KSlot[]; fi: KSlot[]; fo: KSlot[]; sp: KSlot[]; f?: number; lines?: string[] };
+  | { t: 'gt'; e: number; d: number; s: number; ii: KSlot[]; io: KSlot[]; fi: KSlot[]; fo: KSlot[]; sp: KSlot[]; f?: number; lines?: string[] }
+  | {
+      t: 'generic';
+      s: { x: number; y: number; w?: number; h?: number; r: number; k: KSlot; tip?: string[]; d?: 1 }[];
+      tx?: GenericText[];
+      bg?: number;
+      fg?: number;
+      for?: string[];
+    };
 
 interface KHandler {
   id: string;
@@ -187,6 +251,8 @@ interface KHandler {
   tab?: string;
   mod?: string;
   badges?: boolean;
+  /** Generic handlers: the recipe width (HandlerInfo), when not NEI's 166. */
+  width?: number;
 }
 
 const shaped: KHandler = {
@@ -206,6 +272,8 @@ const gtByMap = new Map<string, KHandler>();
 const neiExport: NeiExport[] = [];
 const fuelKeys: string[] = [];
 let gtLookupExport: GtLookupExport | undefined;
+let listExport: ListExport | undefined;
+let genericExport: GenericExport | undefined;
 
 /**
  * Grid width of a shaped recipe. Forge's ShapedOreRecipe keeps its width in a field the older
@@ -302,7 +370,7 @@ await parseJsonFile(resolve(exportArg), {
     if (n === 3) {
       domainIds[path[1] as number] = id;
       if (id === 'oreDictionary' && path[2] === 'entries') return 'keep';
-      if (id === 'nei' && (path[2] === 'handlers' || path[2] === 'fuels' || path[2] === 'gtLookup')) return 'keep';
+      if (id === 'nei' && ['handlers', 'fuels', 'gtLookup', 'itemList', 'generic'].includes(String(path[2]))) return 'keep';
       return 'scan';
     }
     if ((id === 'crafting' || id === 'smelting') && path[2] === 'recipes') return n === 4 ? 'scan' : 'keep';
@@ -332,6 +400,8 @@ await parseJsonFile(resolve(exportArg), {
       const d = v as Record<string, Json>;
       neiExport.push(...((d.handlers ?? []) as unknown as NeiExport[]));
       gtLookupExport = d.gtLookup as unknown as GtLookupExport | undefined;
+      listExport = d.itemList as unknown as ListExport | undefined;
+      genericExport = d.generic as unknown as GenericExport | undefined;
       for (const f of (d.fuels ?? []) as unknown as Res[]) {
         const k = itemKeyOf(f);
         if (k) fuelKeys.push(k);
@@ -352,6 +422,57 @@ await parseJsonFile(resolve(exportArg), {
   modNames = ((root as Record<string, Json>).modNames ?? {}) as Record<string, string>;
 });
 console.timeEnd('read export');
+
+// ---------------------------------------------------------------- NEI's item list, generic handlers
+
+// The item list in NEI's order (ItemList.items): every stack the item panel shows, registered like
+// recipe items so they get numbers and icons.
+const listKeys: string[] = [];
+const listGroup: number[] = [];
+const tooltipOf = new Map<string, string[]>();
+const rarityOf = new Map<string, string>();
+for (const it of listExport?.items ?? []) {
+  if (it.hidden) continue;
+  const k = itemKeyOf(it);
+  if (!k || k.endsWith(`@${WILDCARD}`)) continue;
+  listKeys.push(k);
+  listGroup.push(it.group ?? -1);
+  if (it.tooltip && it.tooltip.length > 1) tooltipOf.set(k, it.tooltip.slice(1));
+  const rarity = /^\u00a7([0-9a-fk-or])$/i.exec(it.rarity ?? '')?.[1];
+  if (rarity && rarity.toLowerCase() !== 'f') rarityOf.set(k, rarity.toLowerCase());
+}
+
+// Stacks of the generically captured handlers, by the capture's item numbers.
+const genericKeys = (genericExport?.items ?? []).map((r) => itemKeyOf(r));
+const genericAmount = (genericExport?.items ?? []).map((r) => r.amount ?? 1);
+const genericByIndex = new Map<number, GenericHandlerExport>();
+for (const g of genericExport?.handlers ?? []) if (g.recipes?.length) genericByIndex.set(g.index, g);
+const genericMargin = (genericExport?.handlers ?? [])[0]?.margin ?? 16;
+
+/** A captured recipe with item keys; pictures keep the capture's numbers until written. */
+function genericRecipe(r: GenericRecipeExport): KRecipe {
+  const s = (r.s ?? []).map((st) => {
+    let ids = (st.i ?? []).filter((i) => genericKeys[i]);
+    if (st.a && st.a > 0 && st.a < ids.length) ids = [...ids.slice(st.a), ...ids.slice(0, st.a)];
+    const k: KSlot = { k: [...new Set(ids.map((i) => genericKeys[i]!))] };
+    const n = ids.length ? genericAmount[ids[0]] : 1;
+    if (n !== 1) k.n = n;
+    if (st.c !== undefined) k.c = st.c;
+    return {
+      x: st.x, y: st.y, r: st.r, k,
+      ...(st.w !== undefined && st.w !== 16 ? { w: st.w } : {}),
+      ...(st.h !== undefined && st.h !== 16 ? { h: st.h } : {}),
+      ...(st.tip?.length ? { tip: st.tip } : {}),
+      ...(st.d ? { d: 1 as const } : {}),
+    };
+  });
+  const out: KRecipe = { t: 'generic', s };
+  if (r.t?.length) out.tx = r.t;
+  if (r.bg !== undefined) out.bg = r.bg;
+  if (r.fg !== undefined) out.fg = r.fg;
+  if (r.for?.length) out.for = r.for.map((i) => genericKeys[i]).filter((k): k is string => !!k);
+  return out;
+}
 
 // ---------------------------------------------------------------- handlers as NEI shows them
 
@@ -374,6 +495,7 @@ if (neiExport.length) {
   // the recipes of each tab (hidden ones left out, in NEI's order) with their description lines.
   const out: { h: KHandler; order: number; index: number }[] = [];
   const vanilla: Record<string, KHandler> = { shaped, shapeless, smelting };
+  const usedIds = new Set<string>();
   for (const e of neiExport) {
     let h: KHandler | undefined;
     if (e.kind in vanilla) {
@@ -393,7 +515,18 @@ if (neiExport.length) {
         id: e.id ?? e.map, orderId: e.id ?? e.map, name: e.name ?? e.map, kind: 'gt', catalysts: [], recipes,
         layout, height: 135, yShift: 8, multiple: true,
       };
+    } else if (e.kind === 'other' && genericByIndex.has(e.index)) {
+      const g = genericByIndex.get(e.index)!;
+      let id = e.id ?? e.handlerId ?? e.className;
+      if (usedIds.has(id)) id = `${id}.${e.index}`;
+      h = {
+        id, orderId: id, name: e.name ?? e.className, kind: 'generic', catalysts: [],
+        recipes: (g.recipes ?? []).map(genericRecipe),
+        height: g.size?.[1] ?? 65, yShift: 0, multiple: true,
+        ...(g.size && g.size[0] !== 166 ? { width: g.size[0] } : {}),
+      };
     } else continue;
+    usedIds.add(h.id);
     h.name = (e.name ?? h.name).trim();
     if (e.tabName && e.tabName.trim() !== h.name) h.tab = e.tabName.trim();
     if (e.info?.modName) h.mod = e.info.modName;
@@ -510,7 +643,30 @@ function numberRecipe(r: KRecipe, amperage = 1): NeiRecipe {
       }
       return g;
     }
+    case 'generic': {
+      const g: NeiRecipe = {
+        ps: r.s.map((st) => ({
+          x: st.x, y: st.y, r: st.r, s: numberSlot(st.k),
+          ...(st.w !== undefined ? { w: st.w } : {}),
+          ...(st.h !== undefined ? { h: st.h } : {}),
+          ...(st.tip ? { tip: st.tip } : {}),
+          ...(st.d ? { d: 1 as const } : {}),
+        })),
+      };
+      if (r.tx) g.tx = r.tx;
+      if (r.bg !== undefined) g.bg = pictureNo(r.bg);
+      if (r.fg !== undefined) g.fg = pictureNo(r.fg);
+      return g;
+    }
   }
+}
+
+/** Output numbers of the captured pictures, in order of first use; written with the icons. */
+const pictureOut = new Map<number, number>();
+function pictureNo(id: number): number {
+  let n = pictureOut.get(id);
+  if (n === undefined) pictureOut.set(id, (n = pictureOut.size));
+  return n;
 }
 
 // ---------------------------------------------------------------- write
@@ -572,7 +728,17 @@ allHandlers.forEach((h, hi) => {
     if ('ii' in n) used.push(...(n.ii ?? []));
     if ('fi' in n) used.push(...(n.fi ?? []));
     if ('sp' in n) used.push(...(n.sp ?? []));
-    for (const k of new Set(made.flatMap(slotKeys))) addRef(k, 'm', hi, ri);
+    // Generic handlers, as NEI's Recipe.of reads a recipe: the result stack, or the other stacks
+    // when there is none; ingredients are used. Handlers captured item by item know exactly which
+    // items each recipe was shown for.
+    let madeKeys: string[] | null = null;
+    if (n.ps) {
+      const results = n.ps.filter((p) => p.r === 1);
+      made.push(...(results.length ? results : n.ps.filter((p) => p.r === 2)).map((p) => p.s));
+      used.push(...n.ps.filter((p) => p.r === 0).map((p) => p.s));
+      if (r.t === 'generic' && r.for?.length) madeKeys = r.for.map(baseKey);
+    }
+    for (const k of new Set(madeKeys ?? made.flatMap(slotKeys))) addRef(k, 'm', hi, ri);
     for (const k of new Set(used.flatMap(slotKeys))) addRef(k, 'u', hi, ri);
   });
   flush();
@@ -594,6 +760,7 @@ allHandlers.forEach((h, hi) => {
   if (h.tab) out.tab = h.tab;
   if (h.mod) out.mod = h.mod;
   if (h.badges !== undefined) out.badges = h.badges;
+  if (h.width) out.width = h.width;
   if (h.kind === 'gt') {
     const max: [number, number, number, number] = [0, 0, 0, 0];
     for (const r of h.recipes) {
@@ -608,7 +775,95 @@ allHandlers.forEach((h, hi) => {
   handlersOut.push(out);
 });
 const fuels = fuelKeys.map((k) => indexOf.get(k)).filter((i): i is number => i !== undefined);
-writeFileSync(join(outDir, 'handlers.json'), JSON.stringify({ format: 1, handlers: handlersOut, ...(fuels.length ? { fuels } : {}) }));
+
+// The generic handlers' pictures, cropped to what was drawn: [x, y, width, height] relative to the
+// recipe's origin (the capture drew with a margin around the recipe).
+const pics: [number, number, number, number][] = [];
+if (pictureOut.size) {
+  mkdirSync(join(outDir, 'pictures'), { recursive: true });
+  const images = genericExport?.images ?? [];
+  let missing = 0;
+  for (const [id, no] of pictureOut) {
+    pics[no] = [0, 0, 0, 0];
+    const file = join(picturesDir, images[id] ?? '');
+    if (!images[id] || !existsSync(file)) {
+      missing++;
+      continue;
+    }
+    const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let x0 = info.width, y0 = info.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < info.height; y++) for (let x = 0; x < info.width; x++) {
+      if (!data[(y * info.width + x) * 4 + 3]) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    if (x1 < 0) continue;
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    await sharp(file).extract({ left: x0, top: y0, width: w, height: h }).png({ compressionLevel: 9 })
+      .toFile(join(outDir, 'pictures', `${no}.png`));
+    pics[no] = [x0 - genericMargin, y0 - genericMargin, w, h];
+  }
+  console.log(`pictures: ${pictureOut.size} (${missing} missing)`);
+}
+
+writeFileSync(
+  join(outDir, 'handlers.json'),
+  JSON.stringify({ format: 1, handlers: handlersOut, ...(fuels.length ? { fuels } : {}), ...(pics.length ? { pics } : {}) }),
+);
+
+// NEI's item list and what the item panel and its search need beyond items.json: tooltips (the
+// lines under the name), rarity colours and every ore dictionary name of the listed items.
+if (listKeys.length) {
+  const listIdx = listKeys.map((k) => indexOf.get(k)!);
+  writeFileSync(
+    join(outDir, 'list.json'),
+    JSON.stringify({
+      format: 1,
+      items: listIdx,
+      group: listGroup,
+      groups: (listExport?.groups ?? []).map((g) => [g.name ?? '', g.expanded ? 1 : 0]),
+    }),
+  );
+  const lines: Record<number, string[]> = {};
+  const rarity: Record<number, string> = {};
+  for (const [k, l] of tooltipOf) lines[indexOf.get(k)!] = l;
+  for (const [k, r] of rarityOf) rarity[indexOf.get(k)!] = r;
+  // Ore names of each listed item (OreDictionary.getOreIDs): wildcard entries cover every meta.
+  const listed = new Set(listKeys);
+  const byBase = new Map<string, string[]>();
+  for (const k of listKeys) {
+    const b = baseKey(k);
+    const l = byBase.get(b);
+    if (l) l.push(k);
+    else byBase.set(b, [k]);
+  }
+  const byReg = new Map<string, string[]>();
+  for (const k of listKeys) {
+    const reg = k.replace(/@.*$/, '');
+    const l = byReg.get(reg);
+    if (l) l.push(k);
+    else byReg.set(reg, [k]);
+  }
+  const oreNamesList: string[] = [];
+  const ore: Record<number, number[]> = {};
+  for (const [name, members] of oreNames) {
+    let n = -1;
+    for (const m of members) {
+      const targets = m.endsWith(`@${WILDCARD}`) ? (byReg.get(m.slice(0, -`@${WILDCARD}`.length)) ?? []) : (byBase.get(m) ?? []);
+      for (const t of targets) {
+        if (!listed.has(t)) continue;
+        if (n < 0) n = oreNamesList.push(name) - 1;
+        const i = indexOf.get(t)!;
+        const l = (ore[i] ??= []);
+        if (!l.includes(n)) l.push(n);
+      }
+    }
+  }
+  writeFileSync(join(outDir, 'tooltips.json'), JSON.stringify({ format: 1, lines, rarity, ores: oreNamesList, ore }));
+  console.log(`item list: ${listKeys.length} items, ${listExport?.groups?.length ?? 0} groups, ${tooltipOf.size} tooltips`);
+}
 
 // GregTech tabs also show the recipes of related items (unified and familiar items, a fluid and
 // its containers); list the related keys that have GregTech recipes of their own.
@@ -693,7 +948,7 @@ async function readIcon(file: string): Promise<{ size: number; data: Buffer } | 
   }
 }
 
-// Sheets fill in key order, so items of one mod and kind (GT dusts, ingots...) share sheets. A
+// Sheets fill in key order (after the item list), so items of one mod and kind share sheets. A
 // sheet is written as soon as it is full, so only one open sheet per size is held in memory.
 const sheetSizes: number[] = [];
 const open = new Map<number, { no: number; cells: Buffer[] }>();
@@ -718,7 +973,9 @@ async function writeSheet(no: number, size: number, cells: Buffer[]) {
   iconBytes += png.length;
 }
 
-for (let i = 0; i < keys.length; i++) {
+// NEI's item list goes first, in its order, so a page of the item panel needs few sheets.
+const iconOrder = [...new Set([...listKeys.map((k) => indexOf.get(k)!), ...keys.keys()])];
+for (const i of iconOrder) {
   const file = items.get(keys[i])!.icon;
   if (!file) {
     missingIcons++;

@@ -123,7 +123,8 @@ jobs:
           mkdir -p ../game-data
           if gh release download game-data -R "$GITHUB_REPOSITORY" -D ../game-data \
               -p export.json.gz -p icons-full.tar.gz -p daily-tag.txt; then
-            tar -xzf ../game-data/icons-full.tar.gz -C ../game-data icons
+            # Item icons, and the pictures the exporter captured of NEI handlers (nei-layouts).
+            tar -xzf ../game-data/icons-full.tar.gz -C ../game-data
             DAILY_TAG=$(cat ../game-data/daily-tag.txt) npm run data:items -- \
               ../game-data/export.json.gz ../game-data/icons public/data/questbook.json
             DAILY_TAG=$(cat ../game-data/daily-tag.txt) npm run data:recipes -- \

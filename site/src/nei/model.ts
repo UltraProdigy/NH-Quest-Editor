@@ -46,6 +46,29 @@ export interface NeiRecipe {
   t?: string[];
   /** GT description lines after the standard ones (heat, coil, cleanroom...). */
   x?: string[];
+  /** Generic handlers: the positioned stacks. */
+  ps?: GenericStack[];
+  /** Generic handlers: text the handler draws, [text, x, y, colour, shadow, layer 0 back / 1 front]. */
+  tx?: [string, number, number, number, number, number][];
+  /** Generic handlers: pictures (NeiHandlers.pics) drawn under and over the stacks. */
+  bg?: number;
+  fg?: number;
+}
+
+/** A stack of a generically captured handler (PositionedStack). */
+export interface GenericStack {
+  x: number;
+  y: number;
+  /** Size when not 16 x 16 (tanks and other stacks that draw themselves). */
+  w?: number;
+  h?: number;
+  /** 0 ingredient, 1 result, 2 other. */
+  r: number;
+  s: Slot;
+  /** Extra tooltip lines (PositionedStack.setTooltip). */
+  tip?: string[];
+  /** Draws itself: pictured in the background, so no item is drawn. */
+  d?: 1;
 }
 
 export interface NeiItems {
@@ -131,7 +154,7 @@ export interface GtLayout {
 export interface NeiHandler {
   id: string;
   name: string;
-  kind: 'shaped' | 'shapeless' | 'smelting' | 'gt';
+  kind: 'shaped' | 'shapeless' | 'smelting' | 'gt' | 'generic';
   count: number;
   /** Recipe chunks: [file number, recipe count], in recipe order. */
   chunks: [number, number][];
@@ -148,6 +171,8 @@ export interface NeiHandler {
   layout?: GtLayout;
   /** GT: the most item/fluid inputs/outputs any recipe has, for when the layout was not recorded. */
   max?: [number, number, number, number];
+  /** Recipe width when not NEI's default 166 (HandlerInfo). */
+  width?: number;
 }
 
 export interface NeiHandlers {
@@ -155,6 +180,30 @@ export interface NeiHandlers {
   handlers: NeiHandler[];
   /** The fuels the smelting handler shows in turn (item indexes). */
   fuels?: number[];
+  /** Generic handlers' pictures (pictures/<n>.png): x, y relative to the recipe, width, height. */
+  pics?: [number, number, number, number][];
+}
+
+/** NEI's item list (list.json): item indexes in NEI's order, and the collapsible groups. */
+export interface NeiList {
+  format: 1;
+  items: number[];
+  /** Group of each listed item (index into groups), -1 for none. */
+  group: number[];
+  /** [display name, expanded by default]. */
+  groups: [string, number][];
+}
+
+/** tooltips.json: what the item panel's tooltips and NEI's search read beyond items.json. */
+export interface NeiTooltips {
+  format: 1;
+  /** Tooltip lines under the name, by item index. */
+  lines: Record<number, string[]>;
+  /** Rarity colour code of the name, by item index, when not white. */
+  rarity: Record<number, string>;
+  /** Ore dictionary names, and the ones each listed item has. */
+  ores: string[];
+  ore: Record<number, number[]>;
 }
 
 export interface NeiRecipeChunk {
