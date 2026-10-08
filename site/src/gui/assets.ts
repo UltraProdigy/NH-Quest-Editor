@@ -4,7 +4,7 @@
 // Images are fetched lazily; drawing code asks for an image while drawing and simply skips it until
 // it has loaded (loading asks for a redraw, so it appears a frame later).
 
-import { invalidate } from './frame.ts';
+import { invalidate, redraw } from './frame.ts';
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -17,26 +17,60 @@ export function resourceUrl(loc: string): string {
 
 export const siteUrl = (path: string) => `${BASE}${path.replace(/^\//, '')}`;
 
-type Entry = { img: HTMLImageElement; ok: boolean; failed: boolean; waiting?: (() => void)[] };
+type Entry = {
+  img: HTMLImageElement;
+  ok: boolean;
+  failed: boolean;
+  waiting?: (() => void)[];
+  /** Frame the image was last asked for, and its decoded size in bytes once loaded. */
+  lastUse: number;
+  bytes: number;
+};
 const images = new Map<string, Entry>();
+
+/**
+ * Decoded images kept at most (about 4 bytes per pixel). The item panel and recipe views can ask
+ * for thousands of icon sheets (a 512 px sheet of 3D blocks holds only 4 icons), so images not
+ * drawn for a while are dropped, least recently used first, and fetched again (from the HTTP
+ * cache) if they are needed later.
+ */
+const BUDGET = 192 * 1024 * 1024;
+let loadedBytes = 0;
+
+function evict() {
+  if (loadedBytes <= BUDGET) return;
+  const recent = redraw.frame - 2;
+  const old = [...images].filter(([, e]) => e.ok && e.lastUse < recent).sort((a, b) => a[1].lastUse - b[1].lastUse);
+  for (const [url, e] of old) {
+    if (loadedBytes <= BUDGET * 0.75) break;
+    images.delete(url);
+    loadedBytes -= e.bytes;
+    e.img.onload = e.img.onerror = null;
+    e.img.src = '';
+  }
+}
 
 /** Returns the image if it has loaded, null otherwise (and starts loading it). */
 export function image(url: string): HTMLImageElement | null {
   let e = images.get(url);
   if (!e) {
     const img = new Image();
-    e = { img, ok: false, failed: false };
+    e = { img, ok: false, failed: false, lastUse: redraw.frame, bytes: 0 };
     const entry = e;
     img.onload = () => {
       entry.ok = true;
+      entry.bytes = img.naturalWidth * img.naturalHeight * 4;
+      loadedBytes += entry.bytes;
       for (const cb of entry.waiting ?? []) cb();
       entry.waiting = undefined;
+      evict();
       invalidate();
     };
     img.onerror = () => (entry.failed = true);
     img.src = url;
     images.set(url, e);
   }
+  e.lastUse = redraw.frame;
   return e.ok ? e.img : null;
 }
 
