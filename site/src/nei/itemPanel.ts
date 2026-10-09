@@ -5,9 +5,9 @@
 // subsets button at the top. One overlay is shared by every screen that shows it, so the search
 // and the page stay as they were, as in game.
 //
-// What does nothing here: options, bookmarks (the panel is empty, so NEI draws none of it), the
-// subsets dropdown (the "%" search does read the subsets), and the quantity (it only matters for
-// cheating items in).
+// The bookmark panel on the left is in bookmarks.ts. What does nothing here: options, the subsets
+// dropdown (the "%" search does read the subsets), and the quantity (it only matters for cheating
+// items in, and for Ctrl + A).
 
 import { type Gfx, type TipLine, keys as heldKeys } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
@@ -20,6 +20,10 @@ import { getFilter, formatSearch, stripFormatting, setSubsets, type SearchItem }
 import type { NeiTooltips } from './model.ts';
 import { Btn, type Rect, inside, neiButton, hotkeyLines, LINESPACE } from './draw.ts';
 import type { RecipeMode } from './recipeScreen.ts';
+import { BookmarkPanel, bookmarksHidden, toggleBookmarks, toggleItem } from './bookmarks.ts';
+
+/** Open an item's recipes or usages; `rid` focuses a recipe saved with a bookmark. */
+export type PanelOpen = (key: string, mode: RecipeMode, rid?: string) => void;
 
 const SLOT = 18;
 const PADDING = 2;
@@ -210,7 +214,10 @@ export class ItemPanelOverlay {
   private historyColumns = 0;
   private laidOutHistory = -1;
 
-  constructor(private open: (key: string, mode: RecipeMode) => void) {
+  readonly bookmarkPanel: BookmarkPanel;
+
+  constructor(private open: PanelOpen) {
+    this.bookmarkPanel = new BookmarkPanel((key, mode, rid) => this.open(key, mode, rid));
     void loadList().then(() => {
       void loadTooltips();
       invalidate();
@@ -257,6 +264,7 @@ export class ItemPanelOverlay {
         if (!bad) this.perPage++;
       }
     }
+    this.bookmarkPanel.layout(W, H, gui.w, this.blocked, this.bookmarks());
   }
 
   private slotRect(row: number, column: number): Rect {
@@ -375,6 +383,11 @@ export class ItemPanelOverlay {
     return this.slotAt(mx, my)?.item ?? null;
   }
 
+  /** The bookmark under the mouse, for R and U (a saved recipe opens at that recipe). */
+  hoveredBookmark(mx: number, my: number): { key: string; rid?: string } | null {
+    return this.bookmarkPanel.hoveredItem(mx, my);
+  }
+
   // ---------------------------------------------------------------- drawing
 
   draw(gfx: Gfx, mx: number, my: number) {
@@ -382,9 +395,10 @@ export class ItemPanelOverlay {
     const s = shownItems();
     const hasItems = !!list && s.items.length > 0 && this.perPage > 0;
 
-    // Bottom left: options (recipe mode icon) and bookmarks (shown icon).
+    // Bottom left: options (recipe mode icon) and bookmarks (shown or hidden icon).
     this.iconButton(gfx, this.options(), 32, mx, my);
-    this.iconButton(gfx, this.bookmarks(), 16, mx, my);
+    this.iconButton(gfx, this.bookmarks(), bookmarksHidden() ? 0 : 16, mx, my);
+    this.bookmarkPanel.draw(gfx, mx, my);
     const sub = this.subsets();
     if (sub) {
       const hover = inside(sub, mx, my);
@@ -464,7 +478,8 @@ export class ItemPanelOverlay {
   contains(mx: number, my: number) {
     return (
       inside(this.panel, mx, my) || inside(this.searchArea(), mx, my) || inside(this.options(), mx, my) ||
-      inside(this.bookmarks(), mx, my) || (!!this.subsets() && inside(this.subsets()!, mx, my))
+      inside(this.bookmarks(), mx, my) || (!!this.subsets() && inside(this.subsets()!, mx, my)) ||
+      this.bookmarkPanel.contains(mx, my)
     );
   }
 
@@ -478,6 +493,11 @@ export class ItemPanelOverlay {
       else state.cursor = state.selEnd = cursorAt(state.search, mx - (sa.x + 2 + 4));
       return true;
     }
+    if (b === 0 && inside(this.bookmarks(), mx, my)) {
+      toggleBookmarks();
+      return true;
+    }
+    if (this.bookmarkPanel.mouseDown(mx, my, b)) return true;
     if (!this.contains(mx, my)) return false;
     const s = shownItems();
     const pages = this.numPages(s.items.length);
@@ -519,6 +539,7 @@ export class ItemPanelOverlay {
 
   /** PanelWidget.mouseUp: a click released on the same slot looks the item up (left R, right U). */
   mouseUp(mx: number, my: number, b: number): boolean {
+    if (this.bookmarkPanel.mouseUp(mx, my, b)) return true;
     const down = this.mouseDownSlot;
     this.mouseDownSlot = -1;
     if (down < 0 || b !== this.mouseDownButton) return false;
@@ -536,15 +557,32 @@ export class ItemPanelOverlay {
 
   /** The wheel over the panel turns its pages. */
   scroll(mx: number, my: number, d: number): boolean {
+    if (this.bookmarkPanel.scroll(mx, my, d)) return true;
     if (!inside(this.panel, mx, my)) return false;
     this.turn(d, this.numPages(shownItems().items.length));
     return true;
   }
 
-  /** Keys: typing into the search field, F to focus it, Page Up/Down over the panel. */
+  /**
+   * Keys: typing into the search field, F to focus it, Page Up/Down over the panel, B to hide the
+   * bookmarks, A (Ctrl + A with the amount) to bookmark an item of the panel or the history.
+   */
   key(e: KeyboardEvent, mx: number, my: number): boolean {
     if (state.focused) return this.typeKey(e);
+    if (this.bookmarkPanel.key(e, mx, my)) return true;
+    const k = e.key.toLowerCase();
+    if (k === 'a' && !e.altKey) {
+      const sl = this.slotAt(mx, my);
+      if (sl) {
+        toggleItem(itemKeyAt(sl.item), { withCount: e.ctrlKey || e.metaKey || e.shiftKey, amount: state.quantity || 1 });
+        return true;
+      }
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (k === 'b') {
+      toggleBookmarks();
+      return true;
+    }
     if (e.key.toLowerCase() === 'f') {
       this.setFocus(true);
       state.cursor = state.selEnd = state.search.length;
@@ -657,6 +695,8 @@ export class ItemPanelOverlay {
   // ---------------------------------------------------------------- tooltips
 
   tooltip(mx: number, my: number): (string | TipLine)[] | null {
+    const bt = this.bookmarkPanel.tooltip(mx, my);
+    if (bt) return bt;
     const sl = this.slotAt(mx, my);
     if (sl) {
       const s = shownItems();
@@ -667,6 +707,7 @@ export class ItemPanelOverlay {
       const extra: [string, string][] = !s.forceExpand && sl.group >= 0 && sl.groupSize > 1
         ? [['ALT + LMB', `${sl.extended ? 'Collapse' : 'Expand'} Group (${sl.groupSize} items)`]]
         : [];
+      extra.push(...bookmarkHotkeys());
       lines.splice(1, 0, ...hotkeyLines(false, extra));
       lines[0] += LINESPACE;
       return lines;
@@ -674,7 +715,7 @@ export class ItemPanelOverlay {
     const b = this.pageButtons();
     if (itemList()?.groups.length && shownItems().items.length && inside(b.groups, mx, my)) return ['Collapse/Expand All Collapsible Items'];
     if (inside(this.options(), mx, my)) return ['NEI Options', '§7Only in game'];
-    if (inside(this.bookmarks(), mx, my)) return ['Toggle visibility of the Bookmark Panel', '§7Only in game'];
+    if (inside(this.bookmarks(), mx, my)) return ['Toggle visibility of the Bookmark Panel'];
     const sub = this.subsets();
     if (sub && inside(sub, mx, my)) return ['Item Subsets', '§7Only in game'];
     return null;
@@ -682,6 +723,13 @@ export class ItemPanelOverlay {
 }
 
 // ---------------------------------------------------------------- helpers
+
+/** The bookmark hotkeys NEI lists for a stack outside the bookmark panel. */
+export function bookmarkHotkeys(recipe = false): [string, string][] {
+  const out: [string, string][] = [['A', 'Add Bookmark'], ['CTRL + A', 'Add Bookmark with Count']];
+  if (recipe) out.push(['SHIFT + A', 'Add Bookmark with Recipe'], ['CTRL + SHIFT + A', 'Add Bookmark with Recipe & Count']);
+  return out;
+}
 
 const intersects = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 

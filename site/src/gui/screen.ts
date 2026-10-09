@@ -365,6 +365,9 @@ export class Host {
     c.addEventListener('mousedown', (e) => {
       e.preventDefault();
       [this.mx, this.my] = this.toGui(e);
+      keys.shift = e.shiftKey;
+      keys.alt = e.altKey;
+      keys.ctrl = e.ctrlKey || e.metaKey;
       // Minecraft numbers buttons left=0, right=1, middle=2.
       const b = e.button === 2 ? 1 : e.button === 1 ? 2 : 0;
       mouseButtons[b] = true;
@@ -383,6 +386,9 @@ export class Host {
       (e) => {
         e.preventDefault();
         [this.mx, this.my] = this.toGui(e);
+        keys.shift = e.shiftKey;
+        keys.alt = e.altKey;
+        keys.ctrl = e.ctrlKey || e.metaKey;
         const d = Math.sign(e.deltaY);
         if (d) this.screen?.scroll(this.mx, this.my, d);
         this.invalidate();
@@ -392,6 +398,7 @@ export class Host {
     window.addEventListener('keydown', (e) => {
       keys.shift = e.shiftKey;
       keys.alt = e.altKey;
+      keys.ctrl = e.ctrlKey || e.metaKey;
       // Alt shows NEI's hotkey list; keep it from opening the browser's menu bar.
       if (e.key === 'Alt') e.preventDefault();
       this.invalidate();
@@ -401,12 +408,13 @@ export class Host {
     window.addEventListener('keyup', (e) => {
       keys.shift = e.shiftKey;
       keys.alt = e.altKey;
+      keys.ctrl = e.ctrlKey || e.metaKey;
       if (e.key === 'Alt') e.preventDefault();
       this.invalidate();
     });
     window.addEventListener('blur', () => {
       mouseButtons.fill(false);
-      keys.shift = keys.alt = false;
+      keys.shift = keys.alt = keys.ctrl = false;
       this.invalidate();
     });
 

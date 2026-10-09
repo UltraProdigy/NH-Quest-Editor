@@ -20,7 +20,7 @@ export class NeiInventoryScreen extends Screen {
   private gl = 0;
   private gt = 0;
   private lastMouse: [number, number] = [-1, -1];
-  private overlay = new ItemPanelOverlay((key, mode) => void openLookup(this, key, mode));
+  private overlay = new ItemPanelOverlay((key, mode, rid) => void openLookup(this, key, mode, rid));
 
   route() {
     return '#/nei';
@@ -67,6 +67,11 @@ export class NeiInventoryScreen extends Screen {
       const item = this.overlay.hoveredItem(mx, my);
       if (item !== null) {
         void openLookup(this, itemKeyAt(item), k === 'r' ? 'recipe' : 'usage');
+        return true;
+      }
+      const bm = this.overlay.hoveredBookmark(mx, my);
+      if (bm) {
+        void openLookup(this, bm.key, k === 'r' ? 'recipe' : 'usage', bm.rid);
         return true;
       }
     }

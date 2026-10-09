@@ -11,7 +11,8 @@ import { openLookup, RecipeScreen, type RecipeMode } from './nei/recipeScreen.ts
 import { NeiInventoryScreen } from './nei/inventoryScreen.ts';
 import { splitString, plainText, setForceMonochrome } from './gui/text.ts';
 import { loadQuestbook, quest as getQuest, fullId, linesContaining, view, questNbtFluid, type QuestState } from './store.ts';
-import { nbtFluidOf, questTab } from './nei/data.ts';
+import { nbtFluidOf, questTab, loadNei, itemIndexOf, itemKeyAt } from './nei/data.ts';
+import { toggleItem } from './nei/bookmarks.ts';
 import { installQuestTab } from './nei/quests.ts';
 import { QuestLinesScreen } from './screens/questLines.ts';
 import { QuestScreen } from './screens/quest.ts';
@@ -87,6 +88,13 @@ async function start() {
   nbtFluidOf.get = questNbtFluid;
   itemLookup.open = (key, mode) => {
     if (host.screen) void openLookup(host.screen, key, mode);
+  };
+  // NEI's A key over quest items: bookmarks show in NEI's panel (E, or any recipe window).
+  itemLookup.bookmark = (key, withCount) => {
+    void loadNei().then(() => {
+      const i = itemIndexOf(key);
+      toggleItem(i !== undefined ? itemKeyAt(i) : key.replace(/#.*$/, ''), { withCount, amount: 1 });
+    });
   };
   // NEI's BetterQuesting tab: quests that ask for or give an item; their names open them.
   installQuestTab();

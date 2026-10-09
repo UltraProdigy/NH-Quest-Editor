@@ -6,11 +6,11 @@ import { type Gfx } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
 import { animating } from '../gui/frame.ts';
 import type { NeiHandler, NeiRecipe, Slot } from './model.ts';
-import { itemIndexOf, fuelList as exportedFuels, cycleTime, picture } from './data.ts';
+import { itemIndexOf, fuelList as exportedFuels, cycleTime, picture, slotItem, slotAmount, itemKeyAt, drawNeiItem } from './data.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import { splitString } from '../gui/text.ts';
 import { type Rect, inside } from './draw.ts';
-import { gtSlots, drawGtBackground, drawGtForeground, gtRecipeHeight } from './gt.ts';
+import { gtSlots, drawGtBackground, drawGtForeground, gtRecipeHeight, drawSlotBadge, drawFluidAmount } from './gt.ts';
 
 /** A stack placed in a recipe, relative to the recipe's origin (PositionedStack). */
 export interface PlacedSlot {
@@ -193,4 +193,40 @@ export function questTitle(r: NeiRecipe): { lines: string[]; rect: Rect } {
   const w = Math.max(0, ...lines.map((l) => stringWidth(l)));
   const top = 16 - (lines.length - 1) * QUEST_LINE;
   return { lines, rect: { x: 83 - Math.trunc(w / 2) - 1, y: top, w: w + 2, h: 9 + (lines.length - 1) * QUEST_LINE + 1 } };
+}
+
+/** NEIClientUtils.formatChance. */
+export function formatChance(c: number) {
+  const pct = c / 100;
+  return `${Number.isInteger(pct) ? pct : Number(pct.toFixed(2))}%`;
+}
+
+/**
+ * One recipe widget (RecipeWidget.draw): the handler's background, its stacks with their amounts
+ * and badges, then its foreground. (ox, oy) is the recipe's origin; stacks under (mx, my) are
+ * highlighted (pass -1, -1 for none).
+ */
+export function drawRecipeWidget(gfx: Gfx, h: NeiHandler, rec: NeiRecipe, ox: number, oy: number, now: number, mx = -1, my = -1) {
+  drawRecipeBackground(gfx, h, rec, ox, oy, now);
+  for (const ps of recipeSlots(h, rec, now)) {
+    const item = slotItem(ps.slot, now);
+    const o = typeof ps.slot === 'object' ? ps.slot : null;
+    const n = slotAmount(ps.slot);
+    const x = ox + ps.x, y = oy + ps.y;
+    if (ps.hidden) {
+      if (inside({ x, y, w: ps.w ?? 16, h: ps.h ?? 16 }, mx, my)) gfx.fill(x, y, ps.w ?? 16, ps.h ?? 16, 0x80ffffff);
+      continue;
+    }
+    if (item >= 0) {
+      const fluid = ps.fluid || itemKeyAt(item).startsWith('fluid:');
+      drawNeiItem(gfx, item, x, y, !fluid && n > 1 ? String(n) : '');
+      if (fluid && h.kind === 'gt' && n > 0) drawFluidAmount(gfx, n, x, y);
+    }
+    if (h.badges ?? h.kind === 'gt') {
+      if (o?.nc) drawSlotBadge(gfx, 'NC', x, y);
+      else if (o?.c !== undefined) drawSlotBadge(gfx, formatChance(o.c), x, y);
+    }
+    if (inside({ x, y, w: 16, h: 16 }, mx, my)) gfx.fill(x, y, 16, 16, 0x80ffffff);
+  }
+  drawRecipeForeground(gfx, h, rec, ox, oy, now, mx - ox, my - oy);
 }

@@ -310,8 +310,8 @@ export type Tooltip = (string | TipLine)[] | null;
 
 /** Mouse buttons currently held (Mouse.isButtonDown). Updated by the screen host. */
 export const mouseButtons = [false, false, false];
-/** Shift and Alt held (Keyboard.isKeyDown). */
-export const keys = { shift: false, alt: false };
+/** Shift, Alt and Control (or Cmd) held (Keyboard.isKeyDown). */
+export const keys = { shift: false, alt: false, ctrl: false };
 
 export interface Panel {
   transform: GuiRect;

@@ -17,11 +17,11 @@ import {
   handlerList, recipe as getRecipe, recipesFor, usagesFor, slotItem, slotItems, slotObj, slotAmount, drawNeiItem,
   itemTooltipLines, itemKeyAt, itemName, itemIndexOf, shiftSlot, questTab, type HandlerRecipes,
 } from './data.ts';
-import { recipeSlots, recipeHeight, drawRecipeBackground, drawRecipeForeground, questTitle, type PlacedSlot } from './handlers.ts';
-import { drawSlotBadge, drawFluidAmount } from './gt.ts';
+import { recipeSlots, recipeHeight, drawRecipeWidget, formatChance, questTitle, type PlacedSlot } from './handlers.ts';
 import type { NeiHandler } from './model.ts';
 import { Btn, type Rect, inside, nineSlice, guiButton, neiButton, drawMultilineTip, hotkeyLines, LINESPACE } from './draw.ts';
-import { ItemPanelOverlay, addToHistory } from './itemPanel.ts';
+import { ItemPanelOverlay, addToHistory, bookmarkHotkeys } from './itemPanel.ts';
+import { toggleItem, toggleRecipe, recipeAmount, recipeIdOf, parseRecipeId, type RecipeStack } from './bookmarks.ts';
 
 export type RecipeMode = 'recipe' | 'usage';
 
@@ -36,7 +36,7 @@ const BORDER = 5, TRANSPARENCY = 4;
 interface Placed { recipe: number; x: number; y: number; h: number }
 
 /** Called when an item in a recipe is clicked: open its recipes (left) or usages (right). */
-export type OpenLookup = (from: Screen, key: string, mode: RecipeMode) => void;
+export type OpenLookup = (from: Screen, key: string, mode: RecipeMode, rid?: string) => void;
 
 export class RecipeScreen extends Screen {
   useMargins = false;
@@ -51,7 +51,9 @@ export class RecipeScreen extends Screen {
   private ySize = 0;
   private pages: number[][] = [];
   /** NEI's item panel and search around the window. */
-  private overlay = new ItemPanelOverlay((key, mode) => this.open(this, key, mode));
+  private overlay = new ItemPanelOverlay((key, mode, rid) => this.open(this, key, mode, rid));
+  /** A recipe to show first (a bookmark's saved recipe): its page is found once paginated. */
+  private pendingRecipe: number | undefined;
 
   constructor(
     parent: Screen | null,
@@ -59,12 +61,15 @@ export class RecipeScreen extends Screen {
     public itemKey: string,
     public list: HandlerRecipes[],
     private open: OpenLookup,
-    start?: { handler?: string; page?: number },
+    start?: { handler?: string; page?: number; recipe?: number },
   ) {
     super(parent);
     if (start?.handler) {
       const i = list.findIndex((e) => handlerList()[e.handler]?.id === start.handler);
-      if (i >= 0) this.type = i;
+      if (i >= 0) {
+        this.type = i;
+        this.pendingRecipe = start.recipe;
+      }
     }
     if (start?.page) this.page = Math.max(0, start.page - 1);
   }
@@ -139,6 +144,11 @@ export class RecipeScreen extends Screen {
       used += rh;
     }
     if (page.length) this.pages.push(page);
+    if (this.pendingRecipe !== undefined) {
+      const at = this.pages.findIndex((p) => p.includes(this.pendingRecipe!));
+      if (at >= 0) this.page = at;
+      this.pendingRecipe = undefined;
+    }
     this.page = Math.min(this.page, Math.max(0, this.pages.length - 1));
     if (this.tabPage < 0) this.tabPage = Math.floor(this.type / this.tabsPerPage());
   }
@@ -270,6 +280,34 @@ export class RecipeScreen extends Screen {
     return null;
   }
 
+  /**
+   * GuiRecipe.getFocusedRecipe: the recipe widget under the mouse, with its ingredients and results
+   * as NEI's Recipe.of(handler, index) collects them (not the furnace's fuel or other extras).
+   */
+  private focusedRecipe(mx: number, my: number) {
+    const h = this.handler();
+    if (!h) return null;
+    const w = Math.max(166, h.width ?? 166);
+    const now = performance.now();
+    for (const p of this.placed()) {
+      if (!inside({ x: p.x, y: p.y, w, h: p.h }, mx, my)) continue;
+      const rec = getRecipe(this.list[this.type].handler, p.recipe);
+      if (!rec) return null;
+      const stack = (ps: PlacedSlot): RecipeStack => {
+        const o = slotObj(ps.slot);
+        return { item: slotItem(ps.slot, now), n: slotAmount(ps.slot), ...(o.c !== undefined ? { c: o.c } : {}), perms: slotItems(ps.slot) };
+      };
+      const slots = recipeSlots(h, rec, now).filter((ps) => !ps.other && slotItem(ps.slot, now) >= 0);
+      return {
+        h,
+        recipe: p.recipe,
+        ingredients: slots.filter((ps) => ps.input).map((ps) => ({ ps, stack: stack(ps) })),
+        results: slots.filter((ps) => !ps.input).map((ps) => ({ ps, stack: stack(ps) })),
+      };
+    }
+    return null;
+  }
+
   /** The stack under the mouse: in a recipe or in the catalyst panel. */
   private hovered(mx: number, my: number): { item: number; ps?: PlacedSlot; h?: NeiHandler; px?: number; py?: number } | null {
     const h = this.handler();
@@ -377,29 +415,7 @@ export class RecipeScreen extends Screen {
       const rec = getRecipe(hi, p.recipe);
       if (!rec) continue;
       const ox = p.x, oy = p.y + h.yShift;
-      drawRecipeBackground(gfx, h, rec, ox, oy, now);
-      const slots = recipeSlots(h, rec, now);
-      for (const ps of slots) {
-        const item = slotItem(ps.slot, now);
-        const o = typeof ps.slot === 'object' ? ps.slot : null;
-        const n = slotAmount(ps.slot);
-        const x = ox + ps.x, y = oy + ps.y;
-        if (ps.hidden) {
-          if (inside({ x, y, w: ps.w ?? 16, h: ps.h ?? 16 }, mx, my)) gfx.fill(x, y, ps.w ?? 16, ps.h ?? 16, 0x80ffffff);
-          continue;
-        }
-        if (item >= 0) {
-          const fluid = ps.fluid || itemKeyAt(item).startsWith('fluid:');
-          drawNeiItem(gfx, item, x, y, !fluid && n > 1 ? String(n) : '');
-          if (fluid && h.kind === 'gt' && n > 0) drawFluidAmount(gfx, n, x, y);
-        }
-        if (h.badges ?? h.kind === 'gt') {
-          if (o?.nc) drawSlotBadge(gfx, 'NC', x, y);
-          else if (o?.c !== undefined) drawSlotBadge(gfx, formatChance(o.c), x, y);
-        }
-        if (inside({ x, y, w: 16, h: 16 }, mx, my)) gfx.fill(x, y, 16, 16, 0x80ffffff);
-      }
-      drawRecipeForeground(gfx, h, rec, ox, oy, now, mx - ox, my - oy);
+      drawRecipeWidget(gfx, h, rec, ox, oy, now, mx, my);
       this.drawRecipeButtons(gfx, p, mx, my);
     }
     if (tall) gfx.endClip();
@@ -543,10 +559,36 @@ export class RecipeScreen extends Screen {
       return true;
     }
     if ((k === 'r' || k === 'u') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const mode = k === 'r' ? 'recipe' : 'usage';
       const hit = this.lastMouse ? this.hovered(this.lastMouse[0], this.lastMouse[1]) : null;
       const item = hit?.item ?? this.overlay.hoveredItem(lmx, lmy);
       if (item !== null && item !== undefined) {
-        this.open(this, itemKeyAt(item), k === 'r' ? 'recipe' : 'usage');
+        this.open(this, itemKeyAt(item), mode);
+        return true;
+      }
+      const bm = this.overlay.hoveredBookmark(lmx, lmy);
+      if (bm) {
+        this.open(this, bm.key, mode, bm.rid);
+        return true;
+      }
+    }
+    // A bookmarks the stack under the mouse with the recipe it is in; Shift + A the whole recipe.
+    if (k === 'a' && !e.altKey && this.lastMouse) {
+      const hit = this.hovered(lmx, lmy);
+      if (hit) {
+        const focus = this.focusedRecipe(lmx, lmy);
+        const ctrl = e.ctrlKey || e.metaKey;
+        if (focus) {
+          const rid = recipeIdOf(focus.h, focus.recipe);
+          if (e.shiftKey) {
+            const hovered = focus.results.find((r) => r.ps === hit.ps) ?? focus.results[0];
+            if (hovered) toggleRecipe(rid, hovered.stack, focus.ingredients.map((x) => x.stack));
+          } else {
+            toggleItem(itemKeyAt(hit.item), { recipe: { rid, ...recipeAmount(focus.results.map((x) => x.stack), hit.item) } });
+          }
+        } else {
+          toggleItem(itemKeyAt(hit.item), { withCount: ctrl || e.shiftKey, amount: hit.ps ? slotAmount(hit.ps.slot) : 1 });
+        }
         return true;
       }
     }
@@ -582,7 +624,8 @@ export class RecipeScreen extends Screen {
       if (cycling) lines.push(acceptsFollowing(alts, hit.item));
       // GuiContainerManager.renderToolTips: the hotkeys (or how to show them) under the name, and a
       // gap after the name.
-      lines.splice(1, 0, ...hotkeyLines(cycling));
+      const inRecipe = !!this.focusedRecipe(mx, my);
+      lines.splice(1, 0, ...hotkeyLines(cycling, bookmarkHotkeys(inRecipe)));
       lines[0] += LINESPACE;
       return lines;
     }
@@ -644,23 +687,24 @@ export function acceptsFollowing(list: number[], active: number): TipLine {
 
 const handlerMod = (h: NeiHandler) => (h.kind === 'gt' ? 'GregTech' : 'Minecraft');
 
-/** NEIClientUtils.formatChance. */
-export function formatChance(c: number) {
-  const pct = c / 100;
-  return `${Number.isInteger(pct) ? pct : Number(pct.toFixed(2))}%`;
-}
+export { formatChance } from './handlers.ts';
 
 // ---------------------------------------------------------------- opening
 
 /** Look up an item and open the recipe window for it; returns false when there is nothing to show. */
 export async function openLookup(
-  from: Screen, key: string, mode: RecipeMode, start?: { handler?: string; page?: number }, push = true,
+  from: Screen, key: string, mode: RecipeMode, start?: { handler?: string; page?: number; recipe?: number } | string, push = true,
 ): Promise<boolean> {
   const list = mode === 'recipe' ? await recipesFor(key) : await usagesFor(key);
   if (!list.length) return false;
   const item = itemIndexOf(key);
   if (item !== undefined) addToHistory(item);
-  const screen = new RecipeScreen(from, mode, key, list, (s, k, m) => void openLookup(s, k, m), start);
+  // A bookmark's saved recipe ("<handler>:<recipe>"): open at it when the lookup lists it.
+  if (typeof start === 'string') {
+    const ref = mode === 'recipe' ? parseRecipeId(start) : null;
+    start = ref ? { handler: ref.id, recipe: ref.recipe } : undefined;
+  }
+  const screen = new RecipeScreen(from, mode, key, list, (s, k, m, rid) => void openLookup(s, k, m, rid), start);
   from.host.show(screen, push);
   return true;
 }

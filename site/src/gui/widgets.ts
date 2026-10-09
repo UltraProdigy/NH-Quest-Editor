@@ -250,6 +250,8 @@ export const itemLookup = {
   open: (_key: string, _mode: 'recipe' | 'usage'): void => {},
   /** Show the items an ore dictionary slot accepts (PopItemList). Installed by main.ts. */
   variants: (_title: string, _stacks: ItemRef[]): void => {},
+  /** NEI's A key: add or remove a bookmark. Installed by main.ts. */
+  bookmark: (_key: string, _withCount: boolean): void => {},
 };
 
 /**
@@ -271,6 +273,14 @@ export function lookupOnKey(panel: Panel, key: () => string | null) {
       const item = key();
       if (item) {
         itemLookup.open(item, k === 'r' ? 'recipe' : 'usage');
+        return true;
+      }
+    }
+    // NEI's A (bookmark.add) reaches it the same way; Ctrl + A keeps the amount.
+    if (hoveredIn === redraw.frame && k === 'a' && !e.altKey) {
+      const item = key();
+      if (item) {
+        itemLookup.bookmark(item, e.ctrlKey || e.metaKey || e.shiftKey);
         return true;
       }
     }
