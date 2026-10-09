@@ -5,8 +5,9 @@
 // subsets button at the top. One overlay is shared by every screen that shows it, so the search
 // and the page stay as they were, as in game.
 //
-// What does nothing here: options, bookmarks (the panel is empty, so NEI draws none of it),
-// subsets, and the quantity (it only matters for cheating items in).
+// What does nothing here: options, bookmarks (the panel is empty, so NEI draws none of it), the
+// subsets dropdown (the "%" search does read the subsets), and the quantity (it only matters for
+// cheating items in).
 
 import { type Gfx, type TipLine, keys as heldKeys } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
@@ -15,7 +16,8 @@ import { drawString, stringWidth } from '../gui/font.ts';
 import {
   loadList, itemList, loadTooltips, tooltipData, itemName, itemMod, itemKeyAt, drawNeiItem, itemTooltipLines,
 } from './data.ts';
-import { getFilter, formatSearch, stripFormatting, type SearchItem } from './search.ts';
+import { getFilter, formatSearch, stripFormatting, setSubsets, type SearchItem } from './search.ts';
+import type { NeiTooltips } from './model.ts';
 import { Btn, type Rect, inside, neiButton, hotkeyLines, LINESPACE } from './draw.ts';
 import type { RecipeMode } from './recipeScreen.ts';
 
@@ -67,18 +69,33 @@ function searchData(): SearchItem[] | null {
   if (!list) return null;
   const tips = tooltipData();
   if (searchItems && (searchItemsWithTooltips || !tips)) return searchItems;
-  searchItems = list.items.map((i) => {
+  setSubsets(tips?.subsets ?? []);
+  searchItems = list.items.map((i, pos) => {
     const key = itemKeyAt(i);
     return {
       name: stripFormatting(itemName(i)),
       mod: itemMod(i) ?? 'Minecraft',
       tooltip: stripFormatting((tips?.lines[i] ?? []).join('\n')),
       ores: (tips?.ore[i] ?? []).map((n) => tips!.ores[n]),
-      id: key.startsWith('fluid:') ? key.slice(6) : key.replace(/@.*$/, ''),
+      id: identifier(key, i, tips),
+      pos,
     };
   });
   searchItemsWithTooltips = !!tips;
   return searchItems;
+}
+
+/**
+ * IdentifierFilter's text: the registry name and numeric id:damage (from the export's ids), or the
+ * whole identifier the export recorded for the stack (fluids); older data has registry names only.
+ */
+function identifier(key: string, i: number, tips: NeiTooltips | null): string {
+  const whole = tips?.idents?.[i];
+  if (whole) return whole;
+  const reg = key.startsWith('fluid:') ? key.slice(6) : key.replace(/@.*$/, '');
+  const id = tips?.ids?.[reg];
+  const meta = /@(\d+)/.exec(key)?.[1];
+  return id !== undefined && meta !== undefined ? `${reg}\n${id}:${meta}` : reg;
 }
 
 const groupExpanded = (g: number) => {

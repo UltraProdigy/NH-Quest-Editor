@@ -14,8 +14,13 @@ export interface SearchItem {
   /** Tooltip lines under the name, joined with newlines, formatting removed. */
   tooltip: string;
   ores: string[];
-  /** Registry name ("minecraft:stone"). */
+  /**
+   * What the identifier search (&) matches (IdentifierFilter): "registry name\nid:damage", or for a
+   * fluid "fluid name\nfluid id"; just the registry name when the data has no numeric ids.
+   */
   id: string;
+  /** Position in NEI's item list, for the subset search (%). */
+  pos: number;
 }
 
 export type ItemFilter = (item: SearchItem) => boolean;
@@ -33,6 +38,8 @@ interface Provider {
   color: string;
   mode: Mode;
   filter: (p: RegExp) => ItemFilter;
+  /** Providers that read the token's text rather than a pattern (subsets). */
+  text?: (word: string) => ItemFilter;
 }
 
 /** ItemInfo.addSearchProviders and SubsetWidget's provider, in registration order. */
@@ -42,9 +49,27 @@ const PROVIDERS: Provider[] = [
   { prefix: '$', color: 'b', mode: Mode.ALWAYS, filter: (p) => (i) => i.ores.some((o) => p.test(o)) },
   { prefix: '#', color: 'e', mode: Mode.ALWAYS, filter: (p) => (i) => p.test(i.tooltip) },
   { prefix: '&', color: '6', mode: Mode.ALWAYS, filter: (p) => (i) => p.test(i.id) },
-  // Subsets need NEI's subset tags, which the site does not have: nothing matches.
-  { prefix: '%', color: '5', mode: Mode.PREFIX, filter: () => nothing },
+  // SubsetWidget.DefaultParserProvider with GTNH's pattern mode: every subset whose name (spaces
+  // removed, lower case) contains the text, without spaces.
+  { prefix: '%', color: '5', mode: Mode.PREFIX, filter: () => nothing, text: (w) => subsetFilter(w) },
 ];
+
+/** NEI's item subsets: [full name, [start, length] runs of item list positions]. */
+let subsetTags: [string, number[]][] = [];
+export function setSubsets(tags: [string, number[]][]) {
+  subsetTags = tags;
+  cache.clear();
+}
+
+function subsetFilter(word: string): ItemFilter {
+  const text = word.replace(/\s+/g, '').toLowerCase();
+  const runs: number[][] = [];
+  for (const [name, r] of subsetTags) if (name.replace(/\s+/g, '').toLowerCase().includes(text)) runs.push(r);
+  if (!runs.length) return nothing;
+  const set = new Set<number>();
+  for (const r of runs) for (let i = 0; i + 1 < r.length; i += 2) for (let p = r[i]; p < r[i] + r[i + 1]; p++) set.add(p);
+  return (i) => set.has(i.pos);
+}
 
 /**
  * getProviders: the "always" ones in reverse registration order, then one per prefix. The prefix
@@ -164,6 +189,7 @@ export function splitSearchText(filterText: string): SearchToken[] {
 
 function generateFilters(t: SearchToken, p: Provider): ItemFilter[] {
   return t.words.map((w) => {
+    if (p.text) return p.text(w);
     const pattern = getPattern(w);
     return pattern ? p.filter(pattern) : nothing;
   });

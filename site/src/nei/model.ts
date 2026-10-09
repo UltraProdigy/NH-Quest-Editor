@@ -204,6 +204,11 @@ export interface NeiTooltips {
   /** Ore dictionary names, and the ones each listed item has. */
   ores: string[];
   ore: Record<number, number[]>;
+  /** NEI's identifier search (&): numeric item ids by registry name, and whole identifiers of stacks that differ (fluids). */
+  ids?: Record<string, number>;
+  idents?: Record<number, string>;
+  /** NEI's item subsets (%): full name and [start, length] runs of positions in the item list. */
+  subsets?: [name: string, runs: number[]][];
 }
 
 export interface NeiRecipeChunk {

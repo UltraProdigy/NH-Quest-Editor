@@ -102,10 +102,14 @@ interface ListItemExport extends Res {
   hidden?: boolean;
   tooltip?: string[];
   rarity?: string;
+  /** What NEI's identifier search (&) matches: "registry name\nid:damage", or "fluid name\nfluid id". */
+  ident?: string;
 }
 interface ListExport {
   groups?: { name?: string; expanded?: boolean }[];
   items?: ListItemExport[];
+  /** NEI's item subsets: full name and [start, length] runs of positions in items. */
+  subsets?: { name?: string; items?: number[] }[];
 }
 
 /** A generically captured handler (domain "nei", generic): see exporter NeiGenericCapture. */
@@ -431,10 +435,15 @@ const listKeys: string[] = [];
 const listGroup: number[] = [];
 const tooltipOf = new Map<string, string[]>();
 const rarityOf = new Map<string, string>();
-for (const it of listExport?.items ?? []) {
+const identOf = new Map<string, string>();
+/** Position in the export's item list -> position in listKeys. */
+const listPos = new Map<number, number>();
+for (const [pos, it] of (listExport?.items ?? []).entries()) {
   if (it.hidden) continue;
   const k = itemKeyOf(it);
   if (!k || k.endsWith(`@${WILDCARD}`)) continue;
+  listPos.set(pos, listKeys.length);
+  if (it.ident) identOf.set(k, it.ident);
   listKeys.push(k);
   listGroup.push(it.group ?? -1);
   if (it.tooltip && it.tooltip.length > 1) tooltipOf.set(k, it.tooltip.slice(1));
@@ -861,8 +870,49 @@ if (listKeys.length) {
       }
     }
   }
-  writeFileSync(join(outDir, 'tooltips.json'), JSON.stringify({ format: 1, lines, rarity, ores: oreNamesList, ore }));
-  console.log(`item list: ${listKeys.length} items, ${listExport?.groups?.length ?? 0} groups, ${tooltipOf.size} tooltips`);
+  // NEI's identifier search (&): numeric item ids by registry name ("id" for item k@meta is
+  // "reg\nid:meta"); for stacks whose identifier does not follow that (fluids), the whole text.
+  const ids: Record<string, number> = {};
+  const idents: Record<number, string> = {};
+  for (const [k, ident] of identOf) {
+    const reg = k.replace(/@.*$/, '');
+    const m = /^(.*)\n(\d+):(\d+)$/.exec(ident);
+    const meta = /@(\d+)/.exec(k)?.[1];
+    if (m && m[1] === reg && meta !== undefined && m[3] === meta && (ids[reg] === undefined || ids[reg] === Number(m[2]))) ids[reg] = Number(m[2]);
+    else idents[indexOf.get(k)!] = ident;
+  }
+  // NEI's item subsets (%): each tag's full name and the item indexes it holds, as [start, length]
+  // runs over the list order.
+  const subsets: [string, number[]][] = [];
+  for (const t of listExport?.subsets ?? []) {
+    if (!t.name || !t.items?.length) continue;
+    const positions: number[] = [];
+    for (let i = 0; i + 1 < t.items.length; i += 2) {
+      for (let p = t.items[i]; p < t.items[i] + t.items[i + 1]; p++) {
+        const at = listPos.get(p);
+        if (at !== undefined) positions.push(at);
+      }
+    }
+    const runs: number[] = [];
+    for (const p of positions) {
+      if (runs.length && runs[runs.length - 2] + runs[runs.length - 1] === p) runs[runs.length - 1]++;
+      else runs.push(p, 1);
+    }
+    if (runs.length) subsets.push([t.name, runs]);
+  }
+  writeFileSync(
+    join(outDir, 'tooltips.json'),
+    JSON.stringify({
+      format: 1, lines, rarity, ores: oreNamesList, ore,
+      ...(Object.keys(ids).length ? { ids } : {}),
+      ...(Object.keys(idents).length ? { idents } : {}),
+      ...(subsets.length ? { subsets } : {}),
+    }),
+  );
+  console.log(
+    `item list: ${listKeys.length} items, ${listExport?.groups?.length ?? 0} groups, ${tooltipOf.size} tooltips, ` +
+      `${Object.keys(ids).length} numeric ids, ${subsets.length} subsets`,
+  );
 }
 
 // GregTech tabs also show the recipes of related items (unified and familiar items, a fluid and
