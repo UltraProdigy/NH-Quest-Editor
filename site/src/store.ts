@@ -8,7 +8,15 @@ const dependants = new Map<string, string[]>();
 const linesOf = new Map<string, QuestLine[]>();
 
 export async function loadQuestbook() {
-  book = await fetchJson<QuestbookData>(siteUrl('data/questbook.json'));
+  setQuestbook(await fetchJson<QuestbookData>(siteUrl('data/questbook.json')));
+}
+
+/** Show another questbook (the editor's, after a change) and rebuild the lookups. */
+export function setQuestbook(b: QuestbookData) {
+  book = b;
+  dependants.clear();
+  linesOf.clear();
+  nbtFluids = null;
   for (const q of Object.values(book.quests)) {
     for (const [pre] of q.pre) {
       const list = dependants.get(pre) ?? [];

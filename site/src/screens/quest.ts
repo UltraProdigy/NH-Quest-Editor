@@ -57,6 +57,8 @@ export class QuestScreen extends Screen {
   }
 
   build() {
+    // The questbook may have changed (edit mode): show the quest as it is now.
+    this.q = getQuest(this.questId);
     const q = this.q;
     if (!q) {
       this.host.back();

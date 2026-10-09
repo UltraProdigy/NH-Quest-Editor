@@ -21,6 +21,8 @@ import { QuestScreen } from './quest.ts';
 import { SettingsScreen } from './settings.ts';
 import { SearchScreen } from './search.ts';
 import { loadPrefs, savePrefs } from '../prefs.ts';
+import { editing } from '../edit/session.ts';
+import { EditsScreen } from './edits.ts';
 
 const GRAY = staticColor(0xff444444);
 const WHITE = staticColor(0xffffffff);
@@ -80,6 +82,8 @@ export class QuestLinesScreen extends Screen {
   }
 
   build() {
+    // The questbook may have changed (edit mode): use the line as it is now.
+    if (this.selectedLine) this.selectedLine = getLine(this.selectedLine.id) ?? null;
     // Keep the map position across rebuilds (window resizes).
     // Keep the viewer's map position across rebuilds (window resizes). A view nobody has moved
     // is fitted again instead, since it was only fitted to the old size.
@@ -107,6 +111,16 @@ export class QuestLinesScreen extends Screen {
         onClick: () => this.host.show(new SearchScreen(this)),
       }),
     );
+    // In edit mode: the site's edits (undo, redo, downloads).
+    if (editing.on) {
+      bg.add(
+        new PanelButton(Transform.at(Align.BOTTOM_LEFT, 8, -56, 32, 16), {
+          icon: icon('paint'),
+          tooltip: ['Edits', '§7Undo, redo and download your changes'],
+          onClick: () => this.host.show(new EditsScreen(this)),
+        }),
+      );
+    }
 
     this.txTitle = bg.add(new PanelTextBox(new Transform([0, 0, 0.5, 0], [60, 12, 0, -24]), ''));
     this.txTitle.setColor(col('text_header'));

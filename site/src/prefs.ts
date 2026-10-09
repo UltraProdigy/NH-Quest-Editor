@@ -10,6 +10,8 @@ export interface Prefs {
   mono: boolean;
   /** The questline list stays open (BQ's lock button); on by default here. */
   trayLock: boolean;
+  /** Edit mode (the site's editor) is on. */
+  editMode: boolean;
 }
 
 const KEY = 'nhqe.prefs.v1';
@@ -22,6 +24,7 @@ const defaults: Prefs = {
   implicit: false,
   mono: false,
   trayLock: true,
+  editMode: false,
 };
 
 export function loadPrefs(): Prefs {

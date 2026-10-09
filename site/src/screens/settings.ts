@@ -10,6 +10,8 @@ import { itemIndexSource, hasItemIndex } from '../gui/items.ts';
 import { book, view, type QuestState } from '../store.ts';
 import { mapSettings } from './questCanvas.ts';
 import { loadPrefs, savePrefs } from '../prefs.ts';
+import { editing, startEditing, stopEditing } from '../edit/session.ts';
+import { EditsScreen } from './edits.ts';
 
 const STATES: [QuestState, string][] = [
   ['UNLOCKED', 'Unlocked'],
@@ -80,6 +82,15 @@ export class SettingsScreen extends Screen {
         prefs.markHidden = mapSettings.markHidden;
       },
     );
+    row(
+      () => `Edit mode: ${editing.loading ? 'loading...' : editing.on ? tr('gui.yes') : tr('gui.no')}`,
+      () => {
+        prefs.editMode = !editing.on;
+        if (editing.on) stopEditing();
+        else void startEditing().then(() => this.host.refresh());
+      },
+    ).tooltipLines = ['Change the questbook here and download the changes', 'for a pull request. Edits are saved in this browser.'];
+    if (editing.on) row(() => 'Edits...', () => this.host.show(new EditsScreen(this)));
 
     const src = book.source;
     const game = itemIndexSource();

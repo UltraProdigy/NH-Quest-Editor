@@ -22,6 +22,8 @@ import { PropertiesScreen } from './screens/properties.ts';
 import { mapSettings } from './screens/questCanvas.ts';
 import { setGameNames } from './screens/taskPanels.ts';
 import { loadPrefs } from './prefs.ts';
+import { setRefresh, startEditing, editKey } from './edit/session.ts';
+import { EditsScreen } from './screens/edits.ts';
 
 const SITE_TITLE = 'GTNH Questbook';
 const canvas = document.getElementById('gui') as HTMLCanvasElement;
@@ -70,6 +72,14 @@ async function start() {
     },
   });
   host.setScale(prefs.scale);
+
+  // Edit mode: screens rebuild after every change; Ctrl + Z / Ctrl + Y undo and redo.
+  setRefresh(() => host.refresh());
+  window.addEventListener('keydown', (e) => {
+    if ((e.target as HTMLElement)?.closest?.('input,textarea,select')) return;
+    if (editKey(e)) e.preventDefault();
+  }, true);
+  if (prefs.editMode) void startEditing();
 
   host.navigateToQuestOnMap = (from, questId, lineId) => {
     let s: Screen | null = from;
@@ -170,6 +180,12 @@ async function start() {
       const lines = new QuestLinesScreen(null);
       lines.host = host;
       host.show(new SearchScreen(lines, arg ?? ''), false);
+      return;
+    }
+    if (kind === 'edits') {
+      const lines = new QuestLinesScreen(null);
+      lines.host = host;
+      host.show(new EditsScreen(lines), false);
       return;
     }
     if (kind === 'settings') {
