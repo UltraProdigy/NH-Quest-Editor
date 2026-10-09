@@ -66,6 +66,7 @@ export function variants(ref: ItemRef): string[] {
 export function currentVariant(ref: ItemRef, interval = 1): string {
   const v = variants(ref);
   if (v.length === 1) return v[0];
+  preloadIcons(v);
   animating();
   return v[Math.floor(((performance.now() / 1000) % (v.length * interval)) / interval)];
 }
@@ -108,6 +109,23 @@ export function fluidTooltip(f: FluidRef): string[] {
 // ---------------------------------------------------------------- drawing
 
 /** Index entry whose icon to draw: the exact stack's, or its plain item's when it has none. */
+/** Icon URLs of a list of item keys, kept per list so cycling slots don't rebuild them every frame. */
+const iconUrls = new WeakMap<readonly string[], string[]>();
+
+/**
+ * Ask for the icon of every item a cycling slot shows, not only the current one, so each item
+ * is already loaded when its turn comes (instead of a "?" for a moment). Called every frame the
+ * slot is drawn, which also keeps the images from being dropped as unused.
+ */
+export function preloadIcons(keys: readonly string[]) {
+  let urls = iconUrls.get(keys);
+  if (!urls) {
+    urls = [...new Set(keys.map((k) => iconInfo(k)?.i).filter((i): i is string => !!i).map((i) => siteUrl(iconDir + i)))];
+    iconUrls.set(keys, urls);
+  }
+  for (const u of urls) image(u);
+}
+
 function iconInfo(key: string): ItemInfo | undefined {
   const info = lookup(key);
   if (info?.i || !key.includes('#')) return info;

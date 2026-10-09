@@ -5,7 +5,7 @@ import { fetchJson, siteUrl, image } from '../gui/assets.ts';
 import { type Gfx, keys as heldKeys } from '../gui/core.ts';
 import { animating, invalidate } from '../gui/frame.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
-import { drawItemKey, itemInfo } from '../gui/items.ts';
+import { drawItemKey, itemInfo, preloadIcons } from '../gui/items.ts';
 import type { NeiItems, NeiHandlers, NeiHandler, NeiRecipe, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiList, NeiTooltips } from './model.ts';
 import { shardOf } from './model.ts';
 
@@ -290,6 +290,7 @@ export function shiftSlot(s: Slot, d: number) {
 export function slotItem(s: Slot | null | undefined, now: number): number {
   const list = slotItems(s);
   if (list.length <= 1) return list[0] ?? -1;
+  preloadNeiItems(list);
   animating();
   const n = Math.floor(cycleTime(now) / 1000) + (typeof s === 'object' && s ? (slotShift.get(s) ?? 0) : 0);
   return list[((n % list.length) + list.length) % list.length];
@@ -326,6 +327,34 @@ export function itemTooltipLines(i: number): string[] {
 
 /** GuiDraw.TOOLTIP_HANDLER: lines starting with it are drawn by code, not as text. */
 const TOOLTIP_HANDLER = '\u00a7x';
+
+const neiIconUrls = new WeakMap<readonly number[], string[]>();
+
+/**
+ * Ask for the icons of every item in a cycling slot (ore dictionary and other alternatives), so
+ * the next item is loaded before it is shown. See preloadIcons in gui/items.ts.
+ */
+export function preloadNeiItems(list: readonly number[]) {
+  if (!items) return;
+  let urls = neiIconUrls.get(list);
+  if (!urls) {
+    const set = new Set<string>();
+    const quest: string[] = [];
+    for (const i of list) {
+      const key = items.keys[i];
+      if (key === undefined) continue;
+      if (itemInfo(key)?.i) quest.push(key);
+      else if (items.icons[i] >= 0) set.add(siteUrl(`${DIR}icons/${Math.floor(items.icons[i] / 256)}.png`));
+    }
+    urls = [...set];
+    neiIconUrls.set(list, urls);
+    if (quest.length) questKeys.set(list, quest);
+  }
+  for (const u of urls) image(u);
+  const q = questKeys.get(list);
+  if (q) preloadIcons(q);
+}
+const questKeys = new WeakMap<readonly number[], string[]>();
 
 /** Draw item i into a 16x16 slot at (x, y), with an optional stack-size label. */
 export function drawNeiItem(gfx: Gfx, i: number, x: number, y: number, label = '') {
