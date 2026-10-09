@@ -30,6 +30,7 @@ import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.shader.Framebuffer;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraftforge.fluids.FluidStack;
 
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
@@ -48,6 +49,14 @@ import dev.gtnhplanner.calcoracle.GtnhCalcOracleMod;
  * recipes"); handlers that load nothing that way are asked for each item of NEI's item list instead,
  * within a time budget, which also tells exactly which items each recipe is shown for.
  *
+ * Fluid tanks (getFluidTanks() on a recipe, as Forestry, Tinkers' Construct and NEI Integration
+ * have them) are recorded as stacks of their fluids, with the tooltip the tank gives.
+ *
+ * A foreground that moves with the handler's tick counter (progress bars drawn with
+ * drawProgressBar) is recorded once per handler: the first recipe is drawn over a few hundred ticks,
+ * the part of the picture that changes is cut out of every recipe's foreground, and pictures of that
+ * part at each tick where it changes (within one period) are kept for the site to cycle through.
+ *
  * Everything that draws runs on the client thread (ClientThread). Reflection only.
  */
 public final class NeiGenericCapture {
@@ -55,6 +64,9 @@ public final class NeiGenericCapture {
     /** Space around the recipe area in the pictures, for handlers that draw outside it. */
     public static final int MARGIN = 16;
     private static final int MAX_RECIPES = 20000;
+    /** Ticks the first recipe's foreground is drawn over to find an animation, and its key frames kept. */
+    private static final int PROBE_TICKS = 480;
+    private static final int MAX_KEYS = 64;
 
     private static final Set<String> SKIPPED = new HashSet<String>(Arrays.asList(
         "codechicken.nei.recipe.ProfilerRecipeHandler",
@@ -75,6 +87,12 @@ public final class NeiGenericCapture {
     private final Map<String, Integer> imageIds = new HashMap<String, Integer>();
     /** Stands in for the font renderers while a handler draws (made once: it reads the glyph sizes). */
     private RecordingFontRenderer recorder;
+    /** The handler being captured: its recipe width, and its foreground animation once probed. */
+    private int handlerWidth = 166;
+    private boolean animProbed;
+    private Map<String, Object> anim;
+    /** The part of the foreground that moves, in canvas pixels (rows bottom-up): x0, y0, x1, y1 inclusive. */
+    private int[] animBox;
 
     public NeiGenericCapture(NeiHandlerExporter.Resources resources) {
         this.resources = resources;
@@ -129,6 +147,10 @@ public final class NeiGenericCapture {
         int height = number(call(info, "getHeight"), 65);
         out.put("size", Arrays.asList(Integer.valueOf(width), Integer.valueOf(height)));
         out.put("margin", Integer.valueOf(MARGIN));
+        handlerWidth = width;
+        animProbed = false;
+        anim = null;
+        animBox = null;
 
         Canvas canvas;
         try {
@@ -204,6 +226,9 @@ public final class NeiGenericCapture {
             warn(className + ": " + failures[0] + " recipes failed to capture");
         }
         out.put("status", recipes.isEmpty() ? (failures[0] > 0 ? "failed" : "empty") : "captured");
+        if (anim != null) {
+            out.put("anim", anim);
+        }
         out.put("recipes", recipes);
         return out;
     }
@@ -241,6 +266,11 @@ public final class NeiGenericCapture {
             failures[0]++;
             return null;
         }
+        try {
+            addTanks(stacks, h, r);
+        } catch (Throwable t) {
+            warnOnce("tanks: " + t);
+        }
         out.put("s", stacks);
 
         Minecraft mc = Minecraft.getMinecraft();
@@ -259,6 +289,21 @@ public final class NeiGenericCapture {
         try {
             mc.fontRenderer = recorder;
             setStatic("codechicken.lib.gui.GuiDraw", "fontRenderer", recorder);
+            Field ticks = cycleTicks(h);
+            if (!animProbed) {
+                animProbed = true;
+                if (ticks != null) {
+                    try {
+                        probe(h, r, canvas, ticks);
+                    } catch (Throwable t) {
+                        warnOnce("animation: " + t);
+                        anim = null;
+                        animBox = null;
+                    }
+                }
+                recorder.lines.clear();
+            }
+            setTicks(h, ticks, 0);
             int bg = canvas.draw(() -> {
                 call(h, "drawBackground", Integer.valueOf(r));
                 if (!custom.isEmpty()) {
@@ -270,7 +315,11 @@ public final class NeiGenericCapture {
                 }
             });
             addText(text, recorder, 0);
-            int fg = canvas.draw(() -> call(h, "drawForeground", Integer.valueOf(r)));
+            byte[] front = canvas.render(() -> call(h, "drawForeground", Integer.valueOf(r)));
+            if (animBox != null) {
+                cut(front, canvas.width, animBox, false);
+            }
+            int fg = canvas.store(front);
             addText(text, recorder, 1);
             if (bg >= 0) out.put("bg", Integer.valueOf(bg));
             if (fg >= 0) out.put("fg", Integer.valueOf(fg));
@@ -372,6 +421,227 @@ public final class NeiGenericCapture {
         return false;
     }
 
+    // ------------------------------------------------------------------------------------- fluid tanks
+
+    /**
+     * Fluid tanks of the recipe (CachedRecipe.getFluidTanks()): each one's area, its fluids (the
+     * permutations of a tank that cycles) and the tooltip it gives. A tank right of every ingredient
+     * (or, without ingredients, in the right half) is a result, any other one an ingredient. The
+     * handler draws its tanks, so they are pictured, not drawn as items.
+     */
+    private void addTanks(List<Object> out, Object h, int r) {
+        Object list = field(h, "arecipes");
+        if (!(list instanceof List) || r >= ((List<?>) list).size()) {
+            return;
+        }
+        Object tanks = call(((List<?>) list).get(r), "getFluidTanks");
+        if (tanks == null) {
+            return;
+        }
+        int inputsRight = -1;
+        for (Object o : out) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> s = (Map<String, Object>) o;
+            if (Integer.valueOf(0).equals(s.get("r"))) {
+                int w = s.get("w") instanceof Integer ? ((Integer) s.get("w")).intValue() : 16;
+                inputsRight = Math.max(inputsRight, ((Integer) s.get("x")).intValue() + w);
+            }
+        }
+        for (Object tank : iterable(tanks)) {
+            Object pos = field(tank, "position");
+            if (!(pos instanceof java.awt.Rectangle)) {
+                continue;
+            }
+            java.awt.Rectangle rect = (java.awt.Rectangle) pos;
+            List<FluidStack> fluids = new ArrayList<FluidStack>();
+            Object many = field(tank, "tanks");
+            if (many instanceof Object[]) {
+                for (Object t : (Object[]) many) addFluid(fluids, t);
+            }
+            if (fluids.isEmpty()) {
+                addFluid(fluids, field(tank, "tank"));
+                addFluid(fluids, field(tank, "fluid"));
+            }
+            List<Object> ids = new ArrayList<Object>();
+            for (FluidStack f : fluids) {
+                int id = fluidId(f);
+                if (id >= 0 && !ids.contains(Integer.valueOf(id))) ids.add(Integer.valueOf(id));
+            }
+            if (ids.isEmpty()) {
+                continue;
+            }
+            int centre = rect.x + rect.width / 2;
+            boolean input = inputsRight >= 0 ? centre <= inputsRight : centre < handlerWidth / 2;
+            Map<String, Object> s = new LinkedHashMap<String, Object>();
+            s.put("x", Integer.valueOf(rect.x));
+            s.put("y", Integer.valueOf(rect.y));
+            s.put("w", Integer.valueOf(rect.width));
+            s.put("h", Integer.valueOf(rect.height));
+            s.put("r", Integer.valueOf(input ? 0 : 1));
+            s.put("i", ids);
+            Object tip = call(tank, "handleTooltip", new ArrayList<String>());
+            if (tip instanceof List && !((List<?>) tip).isEmpty()) {
+                List<Object> lines = new ArrayList<Object>();
+                for (Object l : (List<?>) tip) lines.add(String.valueOf(l));
+                s.put("name", lines.get(0));
+                if (lines.size() > 1) s.put("tip", lines.subList(1, lines.size()));
+            }
+            s.put("cls", tank.getClass().getSimpleName());
+            s.put("d", Integer.valueOf(1));
+            out.add(s);
+        }
+    }
+
+    private static void addFluid(List<FluidStack> out, Object o) {
+        if (o != null && !(o instanceof FluidStack)) {
+            o = call(o, "getFluid");
+        }
+        if (o instanceof FluidStack && ((FluidStack) o).getFluid() != null && ((FluidStack) o).amount > 0) {
+            out.add((FluidStack) o);
+        }
+    }
+
+    private int fluidId(FluidStack fluid) {
+        String key = "fluid:" + fluid.getFluid().getName() + "x" + fluid.amount;
+        Integer id = itemIds.get(key);
+        if (id == null) {
+            Map<String, Object> item = resources.fluid(fluid);
+            id = Integer.valueOf(item == null ? -1 : items.size());
+            if (item != null) {
+                items.add(item);
+            }
+            itemIds.put(key, id);
+        }
+        return id.intValue();
+    }
+
+    // ------------------------------------------------------------------------------------- animation
+
+    /** TemplateRecipeHandler.cycleticks, the counter drawProgressBar reads. */
+    private static Field cycleTicks(Object h) {
+        for (Class<?> c = h.getClass(); c != null; c = c.getSuperclass()) {
+            try {
+                Field f = c.getDeclaredField("cycleticks");
+                if (f.getType() == int.class) {
+                    f.setAccessible(true);
+                    return f;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
+    private static void setTicks(Object h, Field f, int ticks) {
+        if (f == null) return;
+        try {
+            f.setInt(h, ticks);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * Draws the foreground of the handler's first recipe at a few ticks; if it changes, over
+     * PROBE_TICKS ticks, and when that repeats with a period, keeps the area that changes and a
+     * picture of it at every tick within the period where it changes ("anim": period, keys, pics).
+     */
+    private void probe(Object h, int r, Canvas canvas, Field ticks) throws Exception {
+        Runnable front = () -> call(h, "drawForeground", Integer.valueOf(r));
+        String first = null;
+        boolean moves = false;
+        for (int t : new int[] { 0, 5, 11, 17, 23, 37, 61 }) {
+            setTicks(h, ticks, t);
+            String hash = sha1(canvas.render(front));
+            if (first == null) first = hash;
+            else if (!hash.equals(first)) moves = true;
+        }
+        if (!moves) {
+            return;
+        }
+        String[] hashes = new String[PROBE_TICKS];
+        Map<String, byte[]> frames = new HashMap<String, byte[]>();
+        for (int t = 0; t < PROBE_TICKS; t++) {
+            setTicks(h, ticks, t);
+            byte[] b = canvas.render(front);
+            hashes[t] = sha1(b);
+            if (!frames.containsKey(hashes[t])) frames.put(hashes[t], b);
+        }
+        int period = -1;
+        search:
+        for (int p = 1; p <= PROBE_TICKS / 2; p++) {
+            for (int t = p; t < PROBE_TICKS; t++) {
+                if (!hashes[t].equals(hashes[t - p])) continue search;
+            }
+            period = p;
+            break;
+        }
+        if (period < 0) {
+            warnOnce("foreground changes without repeating; drawn still");
+            return;
+        }
+        List<Integer> keys = new ArrayList<Integer>();
+        for (int t = 0; t < period; t++) {
+            if (t == 0 || !hashes[t].equals(hashes[t - 1])) keys.add(Integer.valueOf(t));
+        }
+        if (keys.size() < 2) {
+            return;
+        }
+        if (keys.size() > MAX_KEYS) {
+            List<Integer> fewer = new ArrayList<Integer>();
+            for (int k = 0; k < MAX_KEYS; k++) fewer.add(keys.get(k * keys.size() / MAX_KEYS));
+            keys = fewer;
+        }
+        // The area where any frame of the period differs from the first.
+        byte[] base = frames.get(hashes[0]);
+        int w = canvas.width, hgt = canvas.height;
+        int x0 = w, y0 = hgt, x1 = -1, y1 = -1;
+        for (int t = 1; t < period; t++) {
+            if (hashes[t].equals(hashes[t - 1])) continue;
+            byte[] f = frames.get(hashes[t]);
+            for (int y = 0; y < hgt; y++) {
+                for (int x = 0; x < w; x++) {
+                    int i = (y * w + x) * 4;
+                    if (f[i] != base[i] || f[i + 1] != base[i + 1] || f[i + 2] != base[i + 2] || f[i + 3] != base[i + 3]) {
+                        x0 = Math.min(x0, x);
+                        y0 = Math.min(y0, y);
+                        x1 = Math.max(x1, x);
+                        y1 = Math.max(y1, y);
+                    }
+                }
+            }
+        }
+        if (x1 < 0) {
+            return;
+        }
+        int[] box = new int[] { x0, y0, x1, y1 };
+        List<Object> pics = new ArrayList<Object>();
+        for (Integer k : keys) {
+            byte[] f = frames.get(hashes[k.intValue()]).clone();
+            cut(f, w, box, true);
+            pics.add(Integer.valueOf(canvas.store(f)));
+        }
+        Map<String, Object> a = new LinkedHashMap<String, Object>();
+        a.put("period", Integer.valueOf(period));
+        a.put("keys", keys);
+        a.put("pics", pics);
+        anim = a;
+        animBox = box;
+    }
+
+    /** Clears the pixels inside the box (keep = false) or outside it (keep = true). */
+    private static void cut(byte[] rgba, int width, int[] box, boolean keep) {
+        int height = rgba.length / 4 / width;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                boolean in = x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3];
+                if (in != keep) {
+                    int i = (y * width + x) * 4;
+                    rgba[i] = rgba[i + 1] = rgba[i + 2] = rgba[i + 3] = 0;
+                }
+            }
+        }
+    }
+
     /** The recipe's stacks, to recognise the same recipe coming back from another item's lookup. */
     private static String signature(Object h, int r) {
         StringBuilder b = new StringBuilder();
@@ -439,6 +709,11 @@ public final class NeiGenericCapture {
 
         /** Draws into a cleared canvas and returns the picture's id, or -1 when nothing was drawn. */
         int draw(Runnable drawing) throws Exception {
+            return store(render(drawing));
+        }
+
+        /** Draws into a cleared canvas and returns its pixels (RGBA, rows bottom-up). */
+        byte[] render(Runnable drawing) throws Exception {
             GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
             GL11.glMatrixMode(GL11.GL_PROJECTION);
             GL11.glPushMatrix();
@@ -477,6 +752,11 @@ public final class NeiGenericCapture {
             }
             byte[] bytes = new byte[width * height * 4];
             pixels.get(bytes);
+            return bytes;
+        }
+
+        /** Stores a picture once and returns its id, or -1 when it is empty. */
+        int store(byte[] bytes) throws Exception {
             boolean any = false;
             for (int i = 3; i < bytes.length; i += 4) {
                 if (bytes[i] != 0) {
@@ -561,6 +841,15 @@ public final class NeiGenericCapture {
             f.setAccessible(true);
             f.set(null, value);
         } catch (Throwable ignored) {
+        }
+    }
+
+    private final Set<String> warnedOnce = new HashSet<String>();
+
+    /** A warning shown once per kind of problem, however many handlers have it. */
+    private void warnOnce(String message) {
+        if (warnedOnce.add(message)) {
+            warn(message);
         }
     }
 

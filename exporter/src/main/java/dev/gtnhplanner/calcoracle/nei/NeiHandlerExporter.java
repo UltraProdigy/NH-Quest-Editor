@@ -17,6 +17,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraftforge.fluids.FluidStack;
 
 import dev.gtnhplanner.calcoracle.GtnhCalcOracleMod;
 
@@ -35,6 +36,11 @@ public final class NeiHandlerExporter {
     public interface Resources {
 
         Map<String, Object> item(ItemStack stack);
+
+        /** The exporter's resource map of a fluid stack (null where fluids are not needed). */
+        default Map<String, Object> fluid(FluidStack stack) {
+            return null;
+        }
     }
 
     private final Resources resources;

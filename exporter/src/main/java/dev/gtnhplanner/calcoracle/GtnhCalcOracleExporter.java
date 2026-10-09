@@ -383,6 +383,11 @@ public final class GtnhCalcOracleExporter {
                     public Map<String, Object> item(ItemStack stack) {
                         return itemStack(stack);
                     }
+
+                    @Override
+                    public Map<String, Object> fluid(FluidStack stack) {
+                        return fluidStack(stack);
+                    }
                 }
             );
             final List<ItemStack> itemList = new ArrayList<ItemStack>();
