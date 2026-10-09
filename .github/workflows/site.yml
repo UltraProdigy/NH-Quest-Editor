@@ -104,6 +104,10 @@ jobs:
         run: npm ci
 
       - name: Test
+        # QUESTS_DIR turns on the round-trip test: every DefaultQuests file must load and save
+        # byte for byte, or the editor's exports would not match what BetterQuesting writes.
+        env:
+          QUESTS_DIR: ../modpack/config/betterquesting/DefaultQuests
         run: npm test
 
       - name: Fetch vanilla font from the Minecraft client

@@ -12,7 +12,7 @@
 // its themes are listed in public/data/themes.json.
 
 import { readFileSync, readdirSync, writeFileSync, mkdirSync, statSync, cpSync, existsSync, rmSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { parseBq, splitKey, bqList, uuidToB64, NBT } from '../src/lib/bqjson.ts';
 import type { BqObject, BqValue } from '../src/lib/bqjson.ts';
@@ -237,6 +237,23 @@ const data: QuestbookData = {
 mkdirSync(dirname(out), { recursive: true });
 const json = JSON.stringify(data);
 writeFileSync(out, json);
+
+// ---------------------------------------------------------------- raw files for the editor
+
+// Every file of the DefaultQuests folder exactly as it is in the modpack, so the editor can load
+// it losslessly and export changes as files and diffs against this commit. About 36 MB, but it
+// compresses to under 2 MB and only loads when edit mode is switched on.
+const rawFiles: Record<string, string> = {};
+const allFiles = (dir: string): string[] =>
+  readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name);
+    return statSync(p).isDirectory() ? allFiles(p) : [p];
+  });
+for (const p of allFiles(src).sort()) rawFiles[relative(src, p).split(sep).join('/')] = readFileSync(p, 'utf8');
+writeFileSync(
+  join(dirname(out), 'quests-raw.json'),
+  JSON.stringify({ format: 1, source: data.source, root: 'config/betterquesting/DefaultQuests', files: rawFiles }),
+);
 
 // ---------------------------------------------------------------- modpack resources
 
