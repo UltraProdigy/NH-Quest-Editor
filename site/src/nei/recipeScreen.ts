@@ -40,6 +40,8 @@ export type OpenLookup = (from: Screen, key: string, mode: RecipeMode) => void;
 
 export class RecipeScreen extends Screen {
   useMargins = false;
+  /** An NEI screen: the E key closes all of them at once. */
+  readonly neiScreen = true;
   /** Index into `list` of the open handler, and the page within it. */
   type = 0;
   page = 0;
@@ -528,6 +530,16 @@ export class RecipeScreen extends Screen {
     }
     if (e.key === 'Backspace') {
       this.host.back();
+      return true;
+    }
+    if (k === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // The inventory key: in game it closes NEI's recipe screens back to the inventory. With no
+      // inventory to go back to here, it goes straight back to the questbook.
+      let cur = this.host.screen;
+      while (cur && (cur as { neiScreen?: boolean }).neiScreen && cur.parent) {
+        this.host.back();
+        cur = this.host.screen;
+      }
       return true;
     }
     if ((k === 'r' || k === 'u') && !e.ctrlKey && !e.metaKey && !e.altKey) {

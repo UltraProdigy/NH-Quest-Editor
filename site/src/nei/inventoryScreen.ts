@@ -15,6 +15,8 @@ const X_SIZE = 176, Y_SIZE = 166;
 
 export class NeiInventoryScreen extends Screen {
   useMargins = false;
+  /** An NEI screen: the E key closes all of them at once. */
+  readonly neiScreen = true;
   private gl = 0;
   private gt = 0;
   private lastMouse: [number, number] = [-1, -1];
