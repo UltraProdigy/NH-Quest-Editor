@@ -8,6 +8,8 @@ export interface Prefs {
   arrows: boolean;
   implicit: boolean;
   mono: boolean;
+  /** The questline list stays open (BQ's lock button); on by default here. */
+  trayLock: boolean;
 }
 
 const KEY = 'nhqe.prefs.v1';
@@ -19,6 +21,7 @@ const defaults: Prefs = {
   arrows: true,
   implicit: false,
   mono: false,
+  trayLock: true,
 };
 
 export function loadPrefs(): Prefs {

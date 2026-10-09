@@ -28,7 +28,7 @@ const mono = (s: string) => (forceMonochrome ? stripFormatting(s) : s);
 
 // Settings kept for the session, like BQ's static fields and config.
 const ui = {
-  trayLock: false,
+  trayLock: loadPrefs().trayLock,
   hideLockedLines: false,
   viewMode: false,
   chapterScroll: 0,
@@ -149,6 +149,7 @@ export class QuestLinesScreen extends Screen {
         textures: [null, null, null],
         onClick: () => {
           ui.trayLock = !ui.trayLock;
+          savePrefs({ ...loadPrefs(), trayLock: ui.trayLock });
           updateLock();
         },
       }),
