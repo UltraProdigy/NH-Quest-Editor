@@ -1,14 +1,17 @@
 package dev.gtnhplanner.calcoracle.nei;
 
+import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.call;
 import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.callStatic;
 import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.field;
 import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.iterable;
 import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.staticField;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.item.ItemStack;
@@ -55,7 +58,10 @@ public final class NeiItemListExporter {
         }
 
         List<Object> items = new ArrayList<Object>();
+        List<ItemStack> stacks = new ArrayList<ItemStack>();
         int tooltipFailures = 0;
+        int identFailures = 0;
+        Object identifiers = identifierFilter();
         Object list = staticField("codechicken.nei.ItemList", "items");
         for (Object o : new ArrayList<Object>(listOrEmpty(list))) {
             if (!(o instanceof ItemStack)) {
@@ -93,13 +99,117 @@ public final class NeiItemListExporter {
                     warn("tooltip " + stack + ": " + t);
                 }
             }
+            String ident = identifier(identifiers, stack);
+            if (ident != null) {
+                item.put("ident", ident);
+            } else if (identifiers != null && identFailures++ < 5) {
+                warn("no identifier for " + stack);
+            }
             items.add(item);
+            stacks.add(stack);
         }
         if (tooltipFailures > 5) {
             warn(tooltipFailures + " tooltips failed");
         }
+        if (identifiers == null) {
+            warn("no IdentifierFilter: the & search keeps registry names only");
+        }
         out.put("groups", groups);
         out.put("items", items);
+        try {
+            out.put("subsets", subsets(stacks));
+        } catch (Throwable t) {
+            warn("subsets: " + t);
+        }
+        return out;
+    }
+
+    /**
+     * The text NEI's identifier search (&) matches for a stack, as IdentifierFilter.matches builds it:
+     * "registry name\nnumeric id:damage", or for a fluid display stack "fluid name\nfluid id".
+     */
+    private static String identifier(Object filter, ItemStack stack) {
+        if (filter == null) {
+            return null;
+        }
+        Object fluid = null;
+        if (Boolean.TRUE.equals(callStatic("codechicken.nei.recipe.StackInfo", "isFluidDisplayItem", stack))) {
+            fluid = callStatic("codechicken.nei.recipe.StackInfo", "getFluid", stack);
+        }
+        Object name = fluid != null ? call(filter, "getFluidStringIdentifier", fluid) : call(filter, "getStringIdentifier", stack);
+        Object id = fluid != null ? call(filter, "getFluidIdentifier", fluid) : call(filter, "getIdentifier", stack);
+        return name == null || id == null ? null : name + "\n" + id;
+    }
+
+    private static Object identifierFilter() {
+        try {
+            return Class.forName("codechicken.nei.search.IdentifierFilter").getConstructor(Pattern.class)
+                .newInstance(Pattern.compile(""));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * NEI's item subsets (SubsetWidget.tags: mods, creative tabs, Items/Blocks and the rest), the "%"
+     * search and the subsets dropdown read: each tag's full name and the positions in the exported
+     * item list of the stacks its filter matches, as [start, length] runs. Tags NEI made up as parents
+     * (no filter) and tags that match nothing are left out.
+     */
+    private List<Object> subsets(List<ItemStack> stacks) {
+        List<Object> out = new ArrayList<Object>();
+        Object tags = staticField("codechicken.nei.SubsetWidget", "tags");
+        if (!(tags instanceof Map)) {
+            warn("no subset tags");
+            return out;
+        }
+        List<Object> snapshot;
+        synchronized (tags) {
+            snapshot = new ArrayList<Object>(((Map<?, ?>) tags).values());
+        }
+        int failures = 0;
+        for (Object tag : snapshot) {
+            Object name = field(tag, "fullname");
+            Object filter = field(tag, "filter");
+            if (name == null || filter == null || filter.getClass().getName().endsWith("NothingItemFilter")) {
+                continue;
+            }
+            Method matches;
+            try {
+                matches = filter.getClass().getMethod("matches", ItemStack.class);
+                matches.setAccessible(true);
+            } catch (Throwable t) {
+                continue;
+            }
+            List<Object> runs = new ArrayList<Object>();
+            int start = -1;
+            for (int i = 0; i <= stacks.size(); i++) {
+                boolean in = false;
+                if (i < stacks.size()) {
+                    try {
+                        in = Boolean.TRUE.equals(matches.invoke(filter, stacks.get(i)));
+                    } catch (Throwable t) {
+                        failures++;
+                    }
+                }
+                if (in && start < 0) {
+                    start = i;
+                } else if (!in && start >= 0) {
+                    runs.add(Integer.valueOf(start));
+                    runs.add(Integer.valueOf(i - start));
+                    start = -1;
+                }
+            }
+            if (!runs.isEmpty()) {
+                Map<String, Object> s = new LinkedHashMap<String, Object>();
+                s.put("name", String.valueOf(name));
+                s.put("items", runs);
+                out.add(s);
+            }
+        }
+        if (failures > 0) {
+            warn("subsets: " + failures + " filter checks failed");
+        }
         return out;
     }
 
