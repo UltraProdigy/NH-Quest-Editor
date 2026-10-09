@@ -15,9 +15,9 @@ import { texture } from '../gui/assets.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import {
   handlerList, recipe as getRecipe, recipesFor, usagesFor, slotItem, slotItems, slotObj, slotAmount, drawNeiItem,
-  itemTooltipLines, itemKeyAt, itemName, itemIndexOf, shiftSlot, type HandlerRecipes,
+  itemTooltipLines, itemKeyAt, itemName, itemIndexOf, shiftSlot, questTab, type HandlerRecipes,
 } from './data.ts';
-import { recipeSlots, recipeHeight, drawRecipeBackground, drawRecipeForeground, type PlacedSlot } from './handlers.ts';
+import { recipeSlots, recipeHeight, drawRecipeBackground, drawRecipeForeground, questTitle, type PlacedSlot } from './handlers.ts';
 import { drawSlotBadge, drawFluidAmount } from './gt.ts';
 import type { NeiHandler } from './model.ts';
 import { Btn, type Rect, inside, nineSlice, guiButton, neiButton, drawMultilineTip, hotkeyLines, LINESPACE } from './draw.ts';
@@ -98,11 +98,20 @@ export class RecipeScreen extends Screen {
     this.gl = Math.floor((W - X_SIZE) / 2);
     this.gt = Math.max(22 - 3 + TAB, Math.floor((H - this.ySize) / 2));
     this.paginate();
-    // GuiRecipe.hideItemPanelSlot: no item panel slot under the window (tabs included) or the
-    // catalysts.
+    this.layoutOverlay();
+  }
+
+  /**
+   * GuiRecipe.hideItemPanelSlot: no item panel slot under the window (tabs included), the
+   * catalysts or the recipe container, which a wide handler (Avaritia's) makes wider than the window.
+   */
+  private layoutOverlay() {
     const cat = this.catalysts();
-    this.overlay.layout(W, H, { x: this.gl, y: this.gt, w: X_SIZE, h: this.ySize }, [
+    const c = this.container();
+    const cw = Math.max(c.w, this.handler()?.width ?? 166);
+    this.overlay.layout(this.width, this.height, { x: this.gl, y: this.gt, w: X_SIZE, h: this.ySize }, [
       { x: this.gl, y: this.gt - TAB, w: X_SIZE, h: this.ySize + TAB },
+      { x: c.x, y: c.y, w: cw, h: c.h },
       ...(cat ? [cat.rect] : []),
     ]);
   }
@@ -115,9 +124,11 @@ export class RecipeScreen extends Screen {
     if (!h) return;
     let page: number[] = [];
     let used = 0;
+    // HandlerInfo.multipleWidgetsAllowed: some handlers show one recipe per page.
+    const one = h.multiple === false;
     for (const r of this.recipes()) {
       const rh = recipeHeight(h, null) + h.yShift;
-      if (page.length && used + rh > avail) {
+      if (page.length && (one || used + rh > avail)) {
         this.pages.push(page);
         page = [];
         used = 0;
@@ -136,6 +147,7 @@ export class RecipeScreen extends Screen {
     this.page = 0;
     this.tabPage = Math.floor(this.type / this.tabsPerPage());
     this.paginate();
+    this.layoutOverlay();
     this.host.notify(this);
   }
   private changePage(d: number) {
@@ -230,13 +242,30 @@ export class RecipeScreen extends Screen {
     const c = this.container();
     const out: Placed[] = [];
     if (!h) return out;
+    // GuiRecipe.updateContainerSize: a handler wider than the container widens it (overflow is
+    // allowed by default), and each widget (at least 166 wide) is centred in it.
+    const w = Math.max(166, h.width ?? 166);
+    const cw = Math.max(c.w, h.width ?? 166);
     let y = c.y;
     for (const r of this.pages[this.page] ?? []) {
       const rh = recipeHeight(h, null) + h.yShift;
-      out.push({ recipe: r, x: c.x + 2, y, h: rh });
+      out.push({ recipe: r, x: c.x + Math.trunc((cw - w) / 2), y, h: rh });
       y += rh;
     }
     return out;
+  }
+
+  /** The quest whose name is under the mouse, in BetterQuesting's tab. */
+  private questAt(mx: number, my: number): string | null {
+    const h = this.handler();
+    if (h?.kind !== 'quest') return null;
+    for (const p of this.placed()) {
+      const rec = getRecipe(this.list[this.type].handler, p.recipe);
+      if (!rec?.q) continue;
+      const t = questTitle(rec).rect;
+      if (inside({ x: p.x + t.x, y: p.y + h.yShift + t.y, w: t.w, h: t.h }, mx, my)) return rec.q;
+    }
+    return null;
   }
 
   /** The stack under the mouse: in a recipe or in the catalyst panel. */
@@ -335,9 +364,14 @@ export class RecipeScreen extends Screen {
     const h = this.handler();
     if (!h) return;
     const hi = this.list[this.type].handler;
+    // A page that fits its container is drawn without a scissor (ScrollContainer.draw): what a
+    // handler draws outside its area, or a wide handler past the window, shows. A recipe taller
+    // than the container is cut at its top and bottom.
     const c = this.container();
-    gfx.clip(c.x, c.y, c.w, c.h);
-    for (const p of this.placed()) {
+    const placed = this.placed();
+    const tall = placed.reduce((n, p) => n + p.h, 0) > c.h;
+    if (tall) gfx.clip(0, c.y, this.width, c.h);
+    for (const p of placed) {
       const rec = getRecipe(hi, p.recipe);
       if (!rec) continue;
       const ox = p.x, oy = p.y + h.yShift;
@@ -363,10 +397,10 @@ export class RecipeScreen extends Screen {
         }
         if (inside({ x, y, w: 16, h: 16 }, mx, my)) gfx.fill(x, y, 16, 16, 0x80ffffff);
       }
-      drawRecipeForeground(gfx, h, rec, ox, oy, now);
+      drawRecipeForeground(gfx, h, rec, ox, oy, now, mx - ox, my - oy);
       this.drawRecipeButtons(gfx, p, mx, my);
     }
-    gfx.endClip();
+    if (tall) gfx.endClip();
   }
 
   /**
@@ -410,6 +444,12 @@ export class RecipeScreen extends Screen {
   mouseDown(mx: number, my: number, b: number) {
     if (this.overlay.mouseDown(mx, my, b)) return true;
     if (b !== 0 && b !== 1) return true;
+    // BetterQuesting's tab: clicking a quest's name opens the quest (QuestRecipeHandler.mouseClicked).
+    const quest = this.questAt(mx, my);
+    if (quest) {
+      questTab.open(this, quest);
+      return true;
+    }
     const hit = this.hovered(mx, my);
     if (hit) {
       this.open(this, itemKeyAt(hit.item), b === 0 ? 'recipe' : 'usage');
@@ -512,8 +552,11 @@ export class RecipeScreen extends Screen {
     const panelTip = this.overlay.tooltip(mx, my);
     if (panelTip) return panelTip;
     const hit = this.hovered(mx, my);
+    // A fluid tank the handler draws (not a stack): only the lines the tank gives.
+    if (hit?.ps?.hidden && hit.ps.name) return [hit.ps.name, ...(hit.ps.tip ?? [])];
     if (hit) {
       const lines: (string | TipLine)[] = itemTooltipLines(hit.item);
+      if (hit.ps?.name) lines[0] = hit.ps.name;
       const o = hit.ps && typeof hit.ps.slot === 'object' ? slotObj(hit.ps.slot) : null;
       if (hit.ps && (hit.h?.badges ?? hit.h?.kind === 'gt')) {
         const n = slotAmount(hit.ps.slot);

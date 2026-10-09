@@ -59,6 +59,8 @@ export const itemKeyAt = (i: number) => items?.keys[i] ?? '';
 export const itemIndexOf = (key: string) => keyIndex.get(key) ?? keyIndex.get(key.replace(/#.*$/, ''));
 export const oreName = (o: number) => items?.ore[o]?.[0] ?? '';
 export const oreMembers = (o: number) => items?.ore[o]?.[1] ?? [];
+/** Ore dictionary entries of items.json by name. */
+export const oreEntries = () => items?.ore ?? [];
 
 /** Draw a generic handler's picture with the recipe's origin at (x, y). */
 export function picture(gfx: Gfx, n: number, x: number, y: number) {
@@ -152,6 +154,25 @@ const baseKey = (key: string) => key.replace(/#.*$/, '');
  */
 export const nbtFluidOf = { get: (_key: string): string | undefined => undefined };
 
+/**
+ * BetterQuesting's tab (handler kind "quest"): its recipes are the quests that give (made) or ask
+ * for (used) an item, built from the questbook by quests.ts, which installs these.
+ */
+export const questTab = {
+  made: async (_key: string): Promise<number[]> => [],
+  used: async (_key: string): Promise<number[]> => [],
+  recipe: (_r: number): NeiRecipe | null => null,
+  /** Open a quest (clicking its name), from the recipe screen `from`. */
+  open: (_from: unknown, _questId: string): void => {},
+};
+
+async function addQuests(m: Map<number, Set<number> | null>, key: string, mode: 'made' | 'used') {
+  const h = handlers.findIndex((x) => x.kind === 'quest');
+  if (h < 0) return;
+  const rs = await questTab[mode](key);
+  if (rs.length) m.set(h, new Set(rs));
+}
+
 /** Keys whose GregTech recipes (gm) or usages (gu) also show for this one. */
 async function related(key: string, e: NeiIndexShard[string] | undefined, kind: 'gm' | 'gu'): Promise<string[]> {
   const out = new Set(e?.[kind] ?? []);
@@ -179,6 +200,7 @@ export async function recipesFor(key: string): Promise<HandlerRecipes[]> {
   const e = await entry(baseKey(key));
   merge(m, e?.m);
   for (const r of await Promise.all((await related(key, e, 'gm')).map(entry))) merge(m, r?.m, true);
+  await addQuests(m, key, 'made');
   return finish(m);
 }
 
@@ -200,6 +222,7 @@ export async function usagesFor(key: string): Promise<HandlerRecipes[]> {
     const entries = await Promise.all(ores.map((o) => entry(`ore:${oreName(o)}`)));
     for (const oe of entries) merge(m, oe?.u);
   }
+  await addQuests(m, key, 'used');
   return finish(m);
 }
 
@@ -211,6 +234,7 @@ const chunks = new Map<number, NeiRecipeChunk | Promise<NeiRecipeChunk>>();
 export function recipe(h: number, r: number): NeiRecipe | null {
   const hd = handlers[h];
   if (!hd) return null;
+  if (hd.kind === 'quest') return questTab.recipe(r);
   let start = 0;
   for (const [file, count] of hd.chunks) {
     if (r < start + count) {

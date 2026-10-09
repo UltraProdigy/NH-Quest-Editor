@@ -124,6 +124,8 @@ interface GenericStackExport {
   a?: number;
   c?: number;
   tip?: string[];
+  /** A name the stack shows instead of its item's (fluid tanks: the tank's first tooltip line). */
+  name?: string;
   d?: number;
 }
 type GenericText = [text: string, x: number, y: number, color: number, shadow: number, layer: number];
@@ -141,6 +143,8 @@ interface GenericHandlerExport {
   mode?: string;
   status?: string;
   truncated?: boolean;
+  /** A foreground that moves with the tick counter: its period, the ticks it changes at and a picture of the moving part at each. */
+  anim?: { period: number; keys: number[]; pics: number[] };
   recipes?: GenericRecipeExport[];
 }
 interface GenericExport {
@@ -232,7 +236,7 @@ type KRecipe =
   | { t: 'gt'; e: number; d: number; s: number; ii: KSlot[]; io: KSlot[]; fi: KSlot[]; fo: KSlot[]; sp: KSlot[]; f?: number; lines?: string[] }
   | {
       t: 'generic';
-      s: { x: number; y: number; w?: number; h?: number; r: number; k: KSlot; tip?: string[]; d?: 1 }[];
+      s: { x: number; y: number; w?: number; h?: number; r: number; k: KSlot; tip?: string[]; name?: string; d?: 1 }[];
       tx?: GenericText[];
       bg?: number;
       fg?: number;
@@ -257,6 +261,8 @@ interface KHandler {
   badges?: boolean;
   /** Generic handlers: the recipe width (HandlerInfo), when not NEI's 166. */
   width?: number;
+  /** Generic handlers: the moving part of the foreground (capture picture numbers until written). */
+  anim?: { period: number; keys: number[]; pics: number[] };
 }
 
 const shaped: KHandler = {
@@ -472,6 +478,7 @@ function genericRecipe(r: GenericRecipeExport): KRecipe {
       ...(st.w !== undefined && st.w !== 16 ? { w: st.w } : {}),
       ...(st.h !== undefined && st.h !== 16 ? { h: st.h } : {}),
       ...(st.tip?.length ? { tip: st.tip } : {}),
+      ...(st.name ? { name: st.name } : {}),
       ...(st.d ? { d: 1 as const } : {}),
     };
   });
@@ -533,6 +540,15 @@ if (neiExport.length) {
         recipes: (g.recipes ?? []).map(genericRecipe),
         height: g.size?.[1] ?? 65, yShift: 0, multiple: true,
         ...(g.size && g.size[0] !== 166 ? { width: g.size[0] } : {}),
+        ...(g.anim?.keys?.length ? { anim: g.anim } : {}),
+      };
+    } else if (e.className === 'bq_standard.integration.nei.QuestRecipeHandler') {
+      // BetterQuesting's tab: the quests that ask for or give an item. The site builds its
+      // "recipes" from the questbook it already loads (src/nei/quests.ts), so only the tab itself
+      // (name, order, icon) is kept here.
+      h = {
+        id: 'bq_quest', orderId: 'bq_quest', name: e.name ?? 'BetterQuesting', kind: 'quest', catalysts: [], recipes: [],
+        height: 105, yShift: 0, multiple: true,
       };
     } else continue;
     usedIds.add(h.id);
@@ -542,6 +558,7 @@ if (neiExport.length) {
     if (e.info?.height) h.height = e.info.height;
     if (e.info?.yShift !== undefined) h.yShift = e.info.yShift;
     if (e.info?.showBadge !== undefined) h.badges = e.info.showBadge;
+    if (e.info?.multiple === false) h.multiple = false;
     if (e.info?.icon) h.icon = slotOf({ ...e.info.icon, amount: 1 }) ?? undefined;
     h.catalysts = slotsOf(e.catalysts);
     out.push({ h, order: e.order ?? 0, index: e.index });
@@ -659,6 +676,7 @@ function numberRecipe(r: KRecipe, amperage = 1): NeiRecipe {
           ...(st.w !== undefined ? { w: st.w } : {}),
           ...(st.h !== undefined ? { h: st.h } : {}),
           ...(st.tip ? { tip: st.tip } : {}),
+          ...(st.name ? { name: st.name } : {}),
           ...(st.d ? { d: 1 as const } : {}),
         })),
       };
@@ -770,6 +788,8 @@ allHandlers.forEach((h, hi) => {
   if (h.mod) out.mod = h.mod;
   if (h.badges !== undefined) out.badges = h.badges;
   if (h.width) out.width = h.width;
+  if (!h.multiple) out.multiple = false;
+  if (h.anim) out.anim = { period: h.anim.period, keys: h.anim.keys, pics: h.anim.pics.map((p) => (p >= 0 ? pictureNo(p) : -1)) };
   if (h.kind === 'gt') {
     const max: [number, number, number, number] = [0, 0, 0, 0];
     for (const r of h.recipes) {

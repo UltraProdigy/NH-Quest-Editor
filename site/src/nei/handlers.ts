@@ -7,7 +7,9 @@ import { texture } from '../gui/assets.ts';
 import { animating } from '../gui/frame.ts';
 import type { NeiHandler, NeiRecipe, Slot } from './model.ts';
 import { itemIndexOf, fuelList as exportedFuels, cycleTime, picture } from './data.ts';
-import { drawString } from '../gui/font.ts';
+import { drawString, stringWidth } from '../gui/font.ts';
+import { splitString } from '../gui/text.ts';
+import { type Rect, inside } from './draw.ts';
 import { gtSlots, drawGtBackground, drawGtForeground, gtRecipeHeight } from './gt.ts';
 
 /** A stack placed in a recipe, relative to the recipe's origin (PositionedStack). */
@@ -27,6 +29,8 @@ export interface PlacedSlot {
   hidden?: boolean;
   /** Extra tooltip lines the handler gives the stack. */
   tip?: string[];
+  /** A display name the stack was given, shown instead of the item's. */
+  name?: string;
 }
 
 /** TemplateRecipeHandler.cycleticks: one tick per 50 ms. */
@@ -74,6 +78,7 @@ export function recipeSlots(h: NeiHandler, r: NeiRecipe, now: number): PlacedSlo
       out.push(...gtSlots(h, r));
       break;
     case 'generic':
+    case 'quest':
       // PositionedStack.draw centres a 16 px item in the stack's area.
       for (const p of r.ps ?? []) {
         const w = p.w ?? 16, hh = p.h ?? 16;
@@ -82,6 +87,7 @@ export function recipeSlots(h: NeiHandler, r: NeiRecipe, now: number): PlacedSlo
           ...(w !== 16 || hh !== 16 ? { w, h: hh, x: p.x, y: p.y } : {}),
           ...(p.d ? { hidden: true } : {}),
           ...(p.tip ? { tip: p.tip } : {}),
+          ...(p.name ? { name: p.name } : {}),
         });
       }
       break;
@@ -93,9 +99,18 @@ export function recipeSlots(h: NeiHandler, r: NeiRecipe, now: number): PlacedSlo
  * A generic handler's picture and text of one layer (0: drawBackground, 1: drawForeground), as the
  * exporter captured them at GUI scale 1.
  */
-function drawGenericLayer(gfx: Gfx, r: NeiRecipe, x: number, y: number, layer: 0 | 1) {
+function drawGenericLayer(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: number, layer: 0 | 1, now: number) {
   const pic = layer === 0 ? r.bg : r.fg;
   if (pic !== undefined) picture(gfx, pic, x, y);
+  // The moving part of the foreground at the current tick (cycleticks % period).
+  if (layer === 1 && h.anim) {
+    animating();
+    const t = ticks(cycleTime(now)) % h.anim.period;
+    let k = 0;
+    while (k + 1 < h.anim.keys.length && h.anim.keys[k + 1] <= t) k++;
+    const p = h.anim.pics[k];
+    if (p !== undefined && p >= 0) picture(gfx, p, x, y);
+  }
   for (const [text, tx, ty, color, shadow, l] of r.tx ?? []) {
     if (l !== layer) continue;
     // FontRenderer.drawString: a colour without alpha bits is drawn opaque.
@@ -129,15 +144,34 @@ function progressBar(
 /** drawBackground: the handler's texture behind the stacks. */
 export function drawRecipeBackground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: number, now: number) {
   if (h.kind === 'gt') return drawGtBackground(gfx, h, r, x, y, now);
-  if (h.kind === 'generic') return drawGenericLayer(gfx, r, x, y, 0);
+  if (h.kind === 'generic') return drawGenericLayer(gfx, h, r, x, y, 0, now);
+  if (h.kind === 'quest') {
+    // QuestRecipeHandler.drawBackground: the two 4 x 4 grids and the arrow.
+    const bg = texture('bq_standard:textures/gui/nei.png');
+    if (bg) {
+      const k = bg.width / 256;
+      gfx.image(bg, 0, 0, 166 * k, 105 * k, x, y, 166, 105);
+    }
+    return;
+  }
   const tex = texture(h.kind === 'smelting' ? 'minecraft:textures/gui/container/furnace.png' : 'minecraft:textures/gui/container/crafting_table.png');
   if (tex) gfx.image(tex, 5, 11, 166, 65, x, y, 166, 65);
 }
 
-/** drawForeground/drawExtras: animations and text over the stacks. */
-export function drawRecipeForeground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: number, now: number) {
+/** drawForeground/drawExtras: animations and text over the stacks. mx, my: the mouse, relative to the recipe. */
+export function drawRecipeForeground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: number, now: number, mx = -1, my = -1) {
   if (h.kind === 'gt') return drawGtForeground(gfx, h, r, x, y, now);
-  if (h.kind === 'generic') return drawGenericLayer(gfx, r, x, y, 1);
+  if (h.kind === 'generic') return drawGenericLayer(gfx, h, r, x, y, 1, now);
+  if (h.kind === 'quest') {
+    // QuestRecipeHandler.drawExtras: the quest's name, underlined and centred, wrapped upwards
+    // from y = 16, in the hover colour while the mouse is over it.
+    const t = questTitle(r);
+    const hover = inside(t.rect, mx, my);
+    t.lines.forEach((line, i) => {
+      drawString(gfx, line, x + 83 - Math.trunc(stringWidth(line) / 2), y + t.rect.y + i * QUEST_LINE, hover ? 0xffa87a5e : 0xff000000);
+    });
+    return;
+  }
   if (h.kind === 'smelting') {
     const tex = texture('minecraft:textures/gui/container/furnace.png');
     if (!tex) return;
@@ -146,4 +180,17 @@ export function drawRecipeForeground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: n
     progressBar(gfx, tex, x + 51, y + 25, 176, 0, 14, 14, t, 7);
     progressBar(gfx, tex, x + 74, y + 23, 176, 14, 24, 16, t, 0);
   }
+}
+
+const QUEST_LINE = 9 + 1;
+
+/**
+ * The quest name of a BetterQuesting recipe as drawExtras lays it out, and the area that opens the
+ * quest when clicked (isMouseOverTitle), relative to the recipe.
+ */
+export function questTitle(r: NeiRecipe): { lines: string[]; rect: Rect } {
+  const lines = splitString(`§n${(r.qn ?? '').replace(/§[0-9a-fk-or]/gi, '')}`, 166);
+  const w = Math.max(0, ...lines.map((l) => stringWidth(l)));
+  const top = 16 - (lines.length - 1) * QUEST_LINE;
+  return { lines, rect: { x: 83 - Math.trunc(w / 2) - 1, y: top, w: w + 2, h: 9 + (lines.length - 1) * QUEST_LINE + 1 } };
 }

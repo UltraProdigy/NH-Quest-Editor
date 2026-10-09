@@ -53,6 +53,9 @@ export interface NeiRecipe {
   /** Generic handlers: pictures (NeiHandlers.pics) drawn under and over the stacks. */
   bg?: number;
   fg?: number;
+  /** BetterQuesting's tab: the quest's id and name. */
+  q?: string;
+  qn?: string;
 }
 
 /** A stack of a generically captured handler (PositionedStack). */
@@ -67,6 +70,8 @@ export interface GenericStack {
   s: Slot;
   /** Extra tooltip lines (PositionedStack.setTooltip). */
   tip?: string[];
+  /** A display name the stack was given (ItemStack.setStackDisplayName), shown instead of the item's. */
+  name?: string;
   /** Draws itself: pictured in the background, so no item is drawn. */
   d?: 1;
 }
@@ -154,7 +159,8 @@ export interface GtLayout {
 export interface NeiHandler {
   id: string;
   name: string;
-  kind: 'shaped' | 'shapeless' | 'smelting' | 'gt' | 'generic';
+  /** quest: BetterQuesting's tab, whose recipes the site makes from the questbook (quests.ts). */
+  kind: 'shaped' | 'shapeless' | 'smelting' | 'gt' | 'generic' | 'quest';
   count: number;
   /** Recipe chunks: [file number, recipe count], in recipe order. */
   chunks: [number, number][];
@@ -173,6 +179,14 @@ export interface NeiHandler {
   max?: [number, number, number, number];
   /** Recipe width when not NEI's default 166 (HandlerInfo). */
   width?: number;
+  /** HandlerInfo.multipleWidgetsAllowed: false when NEI shows one recipe per page. */
+  multiple?: false;
+  /**
+   * Generic handlers whose foreground moves with the tick counter (progress bars): the period in
+   * ticks, the ticks within it where the picture changes, and the picture (pics, -1 for none) of the
+   * moving part from each of those ticks on. Recipes' own foregrounds leave that part out.
+   */
+  anim?: { period: number; keys: number[]; pics: number[] };
 }
 
 export interface NeiHandlers {

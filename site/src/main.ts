@@ -11,7 +11,8 @@ import { openLookup, RecipeScreen, type RecipeMode } from './nei/recipeScreen.ts
 import { NeiInventoryScreen } from './nei/inventoryScreen.ts';
 import { splitString, plainText, setForceMonochrome } from './gui/text.ts';
 import { loadQuestbook, quest as getQuest, fullId, linesContaining, view, questNbtFluid, type QuestState } from './store.ts';
-import { nbtFluidOf } from './nei/data.ts';
+import { nbtFluidOf, questTab } from './nei/data.ts';
+import { installQuestTab } from './nei/quests.ts';
 import { QuestLinesScreen } from './screens/questLines.ts';
 import { QuestScreen } from './screens/quest.ts';
 import { SearchScreen } from './screens/search.ts';
@@ -87,6 +88,9 @@ async function start() {
   itemLookup.open = (key, mode) => {
     if (host.screen) void openLookup(host.screen, key, mode);
   };
+  // NEI's BetterQuesting tab: quests that ask for or give an item; their names open them.
+  installQuestTab();
+  questTab.open = (from, id) => host.show(new QuestScreen(from as Screen, id));
   itemLookup.variants = (title, stacks) => {
     const s = host.screen;
     if (s) s.openPopup(new PopItemList(title, stacks, () => s.closePopup()));
