@@ -3,6 +3,7 @@
 import { type Gfx, Rect, contains, keys, type Tooltip, type Panel } from '../gui/core.ts';
 import { type GuiColor, pulseColor, staticColor } from '../gui/color.ts';
 import { tex, col, line as themeLine, icon, ImageTexture, type GuiTexture } from '../gui/theme.ts';
+import { animating } from '../gui/frame.ts';
 import { PanelButton, CanvasScrolling, PanelLine, PanelGeneric, itemTexture, lookupOnKey } from '../gui/widgets.ts';
 import { currentVariant } from '../gui/items.ts';
 import { tr } from '../gui/lang.ts';
@@ -10,6 +11,7 @@ import { quest as getQuest, prop, questState, type QuestState } from '../store.t
 import type { Quest, QuestLine } from '../lib/model.ts';
 import { forceMonochrome } from '../gui/text.ts';
 import { stripFormatting } from '../gui/font.ts';
+import { reviewHooks, type Mark, type Ghost } from '../review/hooks.ts';
 
 const FRAME: Record<QuestState, number> = { LOCKED: 0, UNLOCKED: 1, UNCLAIMED: 2, COMPLETED: 3, REPEATABLE: 4 };
 const ICON_COLOR: Record<QuestState, string> = {
@@ -29,6 +31,68 @@ const LINE: Record<QuestState, [string, string]> = {
 
 const mono = (s: string) => (forceMonochrome ? stripFormatting(s) : s);
 
+/** A rectangle's outline, `t` thick, outside the rectangle. */
+export function outline(gfx: Gfx, x: number, y: number, w: number, h: number, argb: number, t = 1) {
+  gfx.fill(x - t, y - t, w + 2 * t, t, argb);
+  gfx.fill(x - t, y + h, w + 2 * t, t, argb);
+  gfx.fill(x - t, y, t, h, argb);
+  gfx.fill(x + w, y, t, h, argb);
+}
+
+/** The colour pulsing between full and half strength, so marks catch the eye. */
+const pulse = (argb: number, dim: boolean, now: number) => {
+  if (dim) return ((0x60 << 24) | (argb & 0xffffff)) >>> 0;
+  const a = Math.round(0xb0 + 0x4f * (0.5 + 0.5 * Math.sin(now / 250)));
+  return ((a << 24) | (argb & 0xffffff)) >>> 0;
+};
+
+/** Outline drawn around a panel's rectangle (a change in review mode). */
+export class PanelOutline extends PanelGeneric {
+  constructor(rect: import('../gui/core.ts').GuiRect, public argb: number, public thickness = 1, public pad = 1) {
+    super(rect, null);
+  }
+  draw(gfx: Gfx) {
+    const r = this.transform;
+    animating();
+    outline(gfx, r.x() - this.pad, r.y() - this.pad, r.w() + 2 * this.pad, r.h() + 2 * this.pad, pulse(this.argb, false, gfx.now), this.thickness);
+  }
+}
+
+/** A quest where it is in the other questbook: a faint icon in a dashed frame. */
+class PanelGhost extends PanelGeneric {
+  constructor(public rect: Rect, private g: Ghost) {
+    super(rect, null);
+  }
+  draw(gfx: Gfx) {
+    const r = this.rect;
+    const x = r.x(), y = r.y(), w = r.w(), h = r.h();
+    const c = this.g.color;
+    const faint = ((0x50 << 24) | (c & 0xffffff)) >>> 0;
+    gfx.fill(x, y, w, h, ((0x28 << 24) | (c & 0xffffff)) >>> 0);
+    const dash = [4, 3];
+    const lx = (x0: number, y0: number, x1: number, y1: number) => gfx.line(x0, y0, x1, y1, 2, (0xd0000000 | (c & 0xffffff)) >>> 0, dash);
+    lx(x, y, x + w, y);
+    lx(x + w, y, x + w, y + h);
+    lx(x + w, y + h, x, y + h);
+    lx(x, y + h, x, y);
+    const q = this.g.quest;
+    if (q?.icon) {
+      const g = gfx.g;
+      const prev = g.globalAlpha;
+      g.globalAlpha = prev * 0.45;
+      itemTexture(q.icon).draw(gfx, x + 4, y + 4, w - 8, h - 8);
+      g.globalAlpha = prev;
+    }
+    if (this.g.to) {
+      const [tx, ty, tw, th] = this.g.to;
+      gfx.line(x + w / 2, y + h / 2, tx + tw / 2, ty + th / 2, 1.5, faint, [3, 3]);
+    }
+  }
+  tooltip(mx: number, my: number): Tooltip {
+    return contains(this.rect, mx, my) ? this.g.tooltip : null;
+  }
+}
+
 /** Settings toggled from the side bar (BQ_Settings equivalents). */
 export const mapSettings = {
   alwaysDrawImplicit: false,
@@ -41,6 +105,9 @@ export class PanelButtonQuest extends PanelButton {
   rect: Rect;
   frame: GuiTexture;
   highlight: GuiColor | null = null;
+  /** Review mode: the quest changed (outline colour). */
+  mark: Mark | null = null;
+  lineId: string | null = null;
 
   constructor(rect: Rect, public q: Quest | null, onOpen?: (q: Quest) => void) {
     super(rect, { onClick: () => q && onOpen?.(q) });
@@ -62,6 +129,11 @@ export class PanelButtonQuest extends PanelButton {
 
   draw(gfx: Gfx, mx: number, my: number) {
     super.draw(gfx, mx, my);
+    if (this.mark) {
+      const r = this.transform;
+      if (!this.mark.dim) animating();
+      outline(gfx, r.x() - 1, r.y() - 1, r.w() + 2, r.h() + 2, pulse(this.mark.color, this.mark.dim, gfx.now), 2);
+    }
     const q = this.q;
     if (q && mapSettings.markHidden) {
       const vis = prop<string>(q, 'visibility');
@@ -93,6 +165,7 @@ export class PanelButtonQuest extends PanelButton {
     }
     const vis = prop<string>(q, 'visibility');
     if (vis === 'HIDDEN' || vis === 'SECRET') lines.push('§8' + (vis === 'HIDDEN' ? 'Hidden quest' : 'Secret quest'));
+    if (reviewHooks.active()) lines.push(...reviewHooks.questTooltip(q.id, this.lineId ?? undefined));
     return lines;
   }
 }
@@ -118,10 +191,14 @@ export class CanvasQuestLine extends CanvasScrolling {
     const panels: Panel[] = [];
     if (l.bgImage) panels.push(new PanelGeneric(new Rect(0, 0, l.bgSize, l.bgSize, 1), new ImageTexture(l.bgImage, false)));
 
+    const reviewing = reviewHooks.active();
+    if (reviewing) for (const g of reviewHooks.ghosts(l)) panels.push(new PanelGhost(new Rect(...g.rect), g));
     const byId = new Map<string, PanelButtonQuest>();
     for (const [id, x, y, w, h] of l.quests) {
       const q = getQuest(id) ?? null;
       const b = new PanelButtonQuest(new Rect(x, y, w, h), q, (qq) => this.onOpen?.(qq));
+      b.lineId = l.id;
+      if (reviewing) b.mark = reviewHooks.questMark(l.id, id);
       this.buttons.push(b);
       byId.set(id, b);
     }

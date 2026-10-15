@@ -12,6 +12,7 @@ import { mapSettings } from './questCanvas.ts';
 import { loadPrefs, savePrefs } from '../prefs.ts';
 import { editing, startEditing, stopEditing } from '../edit/session.ts';
 import { EditsScreen } from './edits.ts';
+import { reviewHooks } from '../review/hooks.ts';
 
 const STATES: [QuestState, string][] = [
   ['UNLOCKED', 'Unlocked'],
@@ -91,6 +92,10 @@ export class SettingsScreen extends Screen {
       },
     ).tooltipLines = ['Change the questbook here and download the changes', 'for a pull request. Edits are saved in this browser.'];
     if (editing.on) row(() => 'Edits...', () => this.host.show(new EditsScreen(this)));
+    row(() => (reviewHooks.active() ? `Reviewing: ${reviewHooks.label()}...` : 'Review a pull request...'), () => reviewHooks.open(this)).tooltipLines = [
+      'See what a modpack pull request changes in the',
+      'questbook, with a checkbox for every change.',
+    ];
 
     const src = book.source;
     const game = itemIndexSource();

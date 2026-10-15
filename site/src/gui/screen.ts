@@ -280,6 +280,8 @@ export class Host {
 
   /** Show a quest on the quest map, reusing the map screen in the parent chain if there is one. */
   navigateToQuestOnMap: (from: Screen, questId: string, lineId?: string) => void = () => {};
+  /** Show a quest line on the quest map. */
+  navigateToLine: (from: Screen, lineId: string) => void = () => {};
 
   /** Rebuild the current screen (after a setting that changes its contents). */
   refresh() {

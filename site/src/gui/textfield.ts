@@ -24,6 +24,10 @@ function hiddenInput(): HTMLInputElement {
     invalidate();
   });
   input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && owner?.onEnter) {
+      e.preventDefault();
+      owner.onEnter();
+    }
     if (e.key === 'Escape') input!.blur();
     e.stopPropagation();
     if (e.key === 'Escape') {
@@ -44,6 +48,10 @@ export class PanelTextField extends BasePanel {
   focused = false;
   lockFocus = false;
   onChange?: (s: string) => void;
+  /** Called on Enter. */
+  onEnter?: () => void;
+  /** Draw the text as stars (a password or token). */
+  mask = false;
 
   constructor(t: GuiRect, text = '') {
     super(t);
@@ -70,22 +78,27 @@ export class PanelTextField extends BasePanel {
     if (owner === this && input) input.value = s;
   }
 
+  private shown() {
+    return this.mask ? '*'.repeat(this.text.length) : this.text;
+  }
+
   draw(gfx: Gfx) {
     const r = this.transform;
+    const text = this.shown();
     const state = this.focused ? 2 : 1;
     tex(`text_box_${state}`).draw(gfx, r.x(), r.y(), r.w(), r.h());
     gfx.clip(r.x(), r.y(), r.w(), r.h());
-    if (!this.text) {
+    if (!text) {
       if (!this.focused) drawString(gfx, this.watermark, r.x() + 4, r.y() + 4, col('text_watermark').argb(), false);
     } else {
       // Keep the end of long text visible.
-      const w = stringWidth(this.text);
+      const w = stringWidth(text);
       const off = Math.max(0, w - (r.w() - 10));
-      drawString(gfx, this.text, r.x() + 4 - off, r.y() + 4, col('text_aux_0').argb(), false);
+      drawString(gfx, text, r.x() + 4 - off, r.y() + 4, col('text_aux_0').argb(), false);
     }
     if (this.focused) animating();
     if (this.focused && Math.floor(performance.now() / 500) % 2 === 0) {
-      const w = stringWidth(this.text);
+      const w = stringWidth(text);
       const off = Math.max(0, w - (r.w() - 10));
       gfx.fill(r.x() + 4 + w - off, r.y() + 3, 1, 10, col('text_highlight').argb());
     }

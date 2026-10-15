@@ -10,6 +10,7 @@ import { itemName } from '../gui/items.ts';
 import { book, quest as getQuest, linesContaining, shortId, prop } from '../store.ts';
 import type { ItemRef } from '../lib/model.ts';
 import { QuestScreen } from './quest.ts';
+import { reviewHooks } from '../review/hooks.ts';
 
 const LABELS: [key: string, label: string][] = [
   ['visibility', 'Visibility'],
@@ -102,7 +103,12 @@ export class PropertiesScreen extends Screen {
       text(0, 'Icon', col1 - 4);
       y += 18;
     }
-    for (const [key, label] of LABELS) pair(label, fmt(key, prop(q, key)));
+    for (const [key, label] of LABELS) {
+      // Review mode: changed properties in colour, with the other version.
+      const other = reviewHooks.active() ? reviewHooks.propBefore(q.id, key) : null;
+      if (other !== null) pair(`§6${label}`, `${fmt(key, prop(q, key))} §7(${reviewHooks.showingBefore() ? 'after' : 'was'}: ${other})`);
+      else pair(label, fmt(key, prop(q, key)));
+    }
 
     heading(`Prerequisites (${q.pre.length})`);
     if (!q.pre.length) pair('', '§7(none)');

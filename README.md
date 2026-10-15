@@ -10,6 +10,35 @@ Crafting, smelting and all GregTech recipe maps are shown so far.
 Planned next: more recipe handlers and an item list, then editing quests in the browser and
 exporting the changes as a pull request.
 
+## Reviewing pull requests
+
+The questbook can show a pull request to the modpack as it would leave the quests: open the
+review button at the bottom left (or Settings, or `#/review`), pick an open pull request that
+changes quests or type any number. Every change is listed with a checkbox, grouped by quest
+line, and marked in the questbook itself:
+
+- quest lines with changes show how many in the list;
+- on the map, changed quests are outlined (green new, yellow changed, blue moved) and quests
+  that were removed or moved show as dashed outlines where they were;
+- in a quest, changed tasks, rewards, prerequisites and properties are outlined, and the
+  description shows added words underlined in green and removed words struck out in red;
+- B (or the button in the side bar) switches between the questbook before and after the pull
+  request.
+
+Ticks are kept in the browser per pull request; a tick stays until a later commit changes that
+quest again. Links keep the pull request (`?pr=<number>`), so any screen can be shared.
+
+How it works: GitHub's API gives the pull request and the files it changes since its merge base
+(about three requests; GitHub allows 60 an hour without a token, and a token entered in the
+review screen raises that). The files themselves come from raw.githubusercontent.com, at the
+merge base and at the head, and are compared object by object (quest, quest line, placement)
+over the site's own quest data, so changes made on master since the branch started are not
+mistaken for the pull request's. Those changes are then applied to master's quests, which is
+what the site shows; changes that master also made since are flagged.
+
+`npm run review -- <number>` prints the same list in a terminal (`NODE_USE_ENV_PROXY=1` behind a
+proxy).
+
 ## Layout
 
 ```
@@ -17,6 +46,8 @@ site/        the website (TypeScript + Vite, no framework; the GUI is drawn on a
   src/gui/       port of BetterQuesting's GUI toolkit: themes, panels, Minecraft font
   src/screens/   questbook screens: quest lines, quest, search, properties, settings
   src/nei/       NEI's recipe window and its handlers (crafting, smelting, GregTech)
+  src/edit/      edit mode: the quest files as a database with undo, autosave and exports
+  src/review/    review mode: a modpack pull request's quest changes, fetched from GitHub
   scripts/       data build steps (quests, items, recipes, vanilla assets)
 exporter/    Forge 1.7.10 mod that exports items, icons and recipes from a running client
 .github/workflows/

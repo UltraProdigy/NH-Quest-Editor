@@ -21,6 +21,20 @@ export const editing = {
 };
 
 let published: QuestbookData | null = null;
+let rawBundle: Promise<RawBundle> | null = null;
+
+/** The modpack's DefaultQuests files the site was built from (loaded once). */
+export function loadRawBundle(): Promise<RawBundle> {
+  rawBundle ??= fetchJson<RawBundle>(siteUrl('data/quests-raw.json'));
+  rawBundle.catch(() => (rawBundle = null));
+  return rawBundle;
+}
+
+/**
+ * Another questbook shown instead of the published or edited one (a pull request under review).
+ * Set it through showInstead().
+ */
+export const display = { override: null as QuestbookData | null };
 let onRefresh: () => void = () => {};
 let saveTimer = 0;
 
@@ -30,7 +44,8 @@ export function setRefresh(f: () => void) {
 }
 
 function showDoc() {
-  if (editing.on && editing.doc) setQuestbook(editing.doc.questbook());
+  if (display.override) setQuestbook(display.override);
+  else if (editing.on && editing.doc) setQuestbook(editing.doc.questbook());
   else if (published) setQuestbook(published);
   onRefresh();
   invalidate();
@@ -47,6 +62,13 @@ export async function saveNow() {
   editing.saveFailed = !(await saveWork({ base: doc.source.commit, savedAt: new Date().toISOString(), edits: doc.edits() }));
 }
 
+/** Show another questbook (null: back to the published or edited one), and rebuild the screens. */
+export function showInstead(b: QuestbookData | null) {
+  published ??= book;
+  display.override = b;
+  showDoc();
+}
+
 /** Switch edit mode on: load the raw files, put back autosaved work, and show the edited questbook. */
 export async function startEditing(): Promise<boolean> {
   editing.on = true;
@@ -59,7 +81,7 @@ export async function startEditing(): Promise<boolean> {
   editing.error = '';
   invalidate();
   try {
-    const bundle = await fetchJson<RawBundle>(siteUrl('data/quests-raw.json'));
+    const bundle = await loadRawBundle();
     const doc = new EditDocument(bundle);
     const saved = await loadWork();
     if (saved?.edits.length) {

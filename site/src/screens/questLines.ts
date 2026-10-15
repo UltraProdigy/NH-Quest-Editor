@@ -23,6 +23,7 @@ import { SearchScreen } from './search.ts';
 import { loadPrefs, savePrefs } from '../prefs.ts';
 import { editing } from '../edit/session.ts';
 import { EditsScreen } from './edits.ts';
+import { reviewHooks } from '../review/hooks.ts';
 
 const GRAY = staticColor(0xff444444);
 const WHITE = staticColor(0xffffffff);
@@ -74,6 +75,11 @@ export class QuestLinesScreen extends Screen {
       openNeiInventory(this);
       return true;
     }
+    // Review mode: B switches between the questbook before and after the pull request.
+    if (!this.popup && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'b' && reviewHooks.active()) {
+      reviewHooks.toggleBefore();
+      return true;
+    }
     return super.key(e);
   }
 
@@ -111,10 +117,21 @@ export class QuestLinesScreen extends Screen {
         onClick: () => this.host.show(new SearchScreen(this)),
       }),
     );
+    // Reviewing a modpack pull request.
+    bg.add(
+      new PanelButton(Transform.at(Align.BOTTOM_LEFT, 8, -56, 32, 16), {
+        icon: icon('notice'),
+        iconColor: reviewHooks.active() ? pulseColor(staticColor(0xffffcc33), WHITE, 2, 0) : null,
+        tooltip: reviewHooks.active()
+          ? [`Reviewing ${reviewHooks.label()}`, '§7The changes, with a checkbox each']
+          : ['Review a pull request', '§7See a modpack pull request\'s quest changes'],
+        onClick: () => reviewHooks.open(this),
+      }),
+    );
     // In edit mode: the site's edits (undo, redo, downloads).
     if (editing.on) {
       bg.add(
-        new PanelButton(Transform.at(Align.BOTTOM_LEFT, 8, -56, 32, 16), {
+        new PanelButton(Transform.at(Align.BOTTOM_LEFT, 8, -72, 32, 16), {
           icon: icon('paint'),
           tooltip: ['Edits', '§7Undo, redo and download your changes'],
           onClick: () => this.host.show(new EditsScreen(this)),
@@ -282,6 +299,17 @@ export class QuestLinesScreen extends Screen {
       () => showDependencyArrows, (v) => setShowDependencyArrows(v),
       (v) => `betterquesting.tooltip.cycle.${v}`, false,
     );
+    if (reviewHooks.active()) {
+      const b = side({
+        icon: icon('refresh'),
+        tooltip: [
+          reviewHooks.showingBefore() ? 'Showing: before the pull request' : 'Showing: after the pull request',
+          '§7Click or press B to switch',
+        ],
+        onClick: () => reviewHooks.toggleBefore(),
+      });
+      b.iconColor = reviewHooks.showingBefore() ? staticColor(0xffff5555) : staticColor(0xff55ff55);
+    }
     toggle(
       'paint', 'betterquesting.btn.force_monochrome',
       () => forceMonochrome, (v) => setForceMonochrome(v),
@@ -353,6 +381,14 @@ export class QuestLinesScreen extends Screen {
       });
       panels.push(btn);
       this.lineButtons.push({ btn, line: l });
+      const changes = reviewHooks.active() ? reviewHooks.lineCount(l.id) : 0;
+      if (changes) {
+        const t = new PanelTextBox(new Rect(16, row * 16 + 4, listW - 20, 12, -1), `§6${changes}`);
+        t.setAlignment(2);
+        t.shadow = true;
+        panels.push(t);
+        btn.tooltipLines = [mono(l.name), `§6${changes} change${changes === 1 ? '' : 's'} in ${reviewHooks.label()}`];
+      }
       row++;
     }
     this.cvLines.addAll(panels);
@@ -376,7 +412,12 @@ export class QuestLinesScreen extends Screen {
       const q = getQuest(id);
       if (q && this.countable(q)) total++;
     }
-    this.txCompletion.setText(tr('betterquesting.title.completion', 0, total, '0.00'));
+    const review = reviewHooks.active() ? reviewHooks.lineCount(this.selectedLine.id) : 0;
+    this.txCompletion.setText(
+      reviewHooks.active()
+        ? `§6${reviewHooks.label()}§r: ${review} change${review === 1 ? '' : 's'} here`
+        : tr('betterquesting.title.completion', 0, total, '0.00'),
+    );
   }
 
   private computeGlobalCompletion() {
@@ -391,6 +432,10 @@ export class QuestLinesScreen extends Screen {
       }
     }
     this.txGlobal.setText(tr('betterquesting.title.completion_total', 0, total, '0.00'));
+  }
+
+  lineById(id: string) {
+    return getLine(id) ?? null;
   }
 
   openQuestLine(l: QuestLine) {

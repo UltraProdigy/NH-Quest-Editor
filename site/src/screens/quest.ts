@@ -12,13 +12,19 @@ import { tr } from '../gui/lang.ts';
 import { texture as loadTexture, whenLoaded, resourceUrl } from '../gui/assets.ts';
 import { plainText, forceMonochrome } from '../gui/text.ts';
 import { stringWidth, stripFormatting } from '../gui/font.ts';
+import { staticColor } from '../gui/color.ts';
 import { quest as getQuest, prop, dependantsOf, isInAnyLine, shortId } from '../store.ts';
 import type { Quest } from '../lib/model.ts';
 import { taskPanel, rewardPanel, typeName } from './taskPanels.ts';
 import { PropertiesScreen } from './properties.ts';
+import { PanelOutline } from './questCanvas.ts';
+import { reviewHooks, STATUS_COLOR, type QuestArea } from '../review/hooks.ts';
 
 const mono = (s: string) => (forceMonochrome ? stripFormatting(s) : s);
 const IMG = /\[img height=([1-9]\d*)\] *(.*?:.*?) *\[\/img\]/g;
+
+/** Review mode: show the description with its changes marked (else the new text). */
+let showDescDiff = true;
 
 // Scroll positions per quest, kept for the session (GuiQuest.scrollsPositions).
 const scrolls = new Map<string, { task: number; reward: number; desc: number }>();
@@ -41,6 +47,10 @@ export class QuestScreen extends Screen {
   key(e: KeyboardEvent) {
     if (!this.popup && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'e') {
       openNeiInventory(this);
+      return true;
+    }
+    if (!this.popup && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'b' && reviewHooks.active()) {
+      reviewHooks.toggleBefore();
       return true;
     }
     return super.key(e);
@@ -66,6 +76,31 @@ export class QuestScreen extends Screen {
     }
     const bg = this.root.add(new CanvasTextured(new Transform(Align.FULL_BOX, [0, 0, 0, 0]), tex('panel_main')));
     bg.add(new PanelTextBox(new Transform(Align.TOP_EDGE, [0, 16, 0, -32]), mono(q.name)).setAlignment(1).setColor(col('text_header')));
+    const review = reviewHooks.active();
+    const mark = (area: QuestArea, index?: number) => (review ? reviewHooks.areaMark(q.id, area, index) : null);
+    if (review) {
+      // The whole quest is new or gone: frame the screen; a changed name: frame the name.
+      const whole = reviewHooks.questStatus(q.id);
+      if (whole !== null) bg.add(new PanelOutline(new Transform(Align.FULL_BOX, [4, 4, 4, 4]), whole, 2, 0));
+      const nameMark = mark('name');
+      if (nameMark !== null) {
+        const w = stringWidth(q.name);
+        bg.add(new PanelOutline(Transform.at(Align.TOP_CENTER, -Math.ceil(w / 2) - 3, 13, w + 6, 13), nameMark));
+      }
+      const changes = reviewHooks.questTooltip(q.id, undefined, true);
+      if (changes.length) {
+        bg.add(
+          new PanelButton(Transform.at(Align.TOP_RIGHT, -32, 10, 16, 16), {
+            icon: icon('notice'),
+            iconColor: staticColor(whole ?? STATUS_COLOR.changed),
+            tooltip: [...changes, '', `§7Showing ${reviewHooks.showingBefore() ? 'before' : 'after'} the pull request.`, '§7Click or press B to switch.'],
+            onClick: () => reviewHooks.toggleBefore(),
+          }),
+        );
+        const which = reviewHooks.showingBefore() ? '§cbefore' : '§2after';
+        bg.add(new PanelTextBox(Transform.at(Align.TOP_RIGHT, -136, 14, 100, 10), `${which}§r §7(B)`).setAlignment(2).setColor(col('text_main')));
+      }
+    }
 
     // The site acts like an editor's view: Back plus a (read-only) properties button.
     bg.add(new PanelButton(Transform.at(Align.BOTTOM_CENTER, -100, -16, 100, 16), { text: tr('gui.back'), onClick: () => this.host.back() }));
@@ -75,6 +110,8 @@ export class QuestScreen extends Screen {
         onClick: () => this.host.show(new PropertiesScreen(this, this.questId)),
       }),
     );
+    const propMark = mark('prop');
+    if (propMark !== null) bg.add(new PanelOutline(Transform.at(Align.BOTTOM_CENTER, 0, -16, 100, 16), propMark));
 
     bg.add(
       new PanelButton(Transform.at(Align.TOP_LEFT, 16, 10, 16, 16), {
@@ -85,14 +122,17 @@ export class QuestScreen extends Screen {
     );
     let btnOffset = 34;
     const deps = this.dependencies();
-    if (deps.length) {
+    const preMark = mark('pre');
+    if (deps.length || preMark !== null) {
       const b: PanelButton = bg.add(
         new PanelButton(Transform.at(Align.TOP_LEFT, btnOffset, 10, 16, 16), {
           icon: icon('left'),
           tooltip: [tr('betterquesting.btn.view_dependencies')],
           onClick: () => this.depPopup(b.transform, deps),
+          active: deps.length > 0,
         }),
       );
+      if (preMark !== null) bg.add(new PanelOutline(Transform.at(Align.TOP_LEFT, btnOffset, 10, 16, 16), preMark));
       btnOffset += 18;
     }
     const dependants = this.dependants();
@@ -102,6 +142,21 @@ export class QuestScreen extends Screen {
           icon: icon('right'),
           tooltip: [tr('betterquesting.btn.view_dependants')],
           onClick: () => this.depPopup(b.transform, dependants),
+        }),
+      );
+      btnOffset += 18;
+    }
+    // Review mode: the description with its changes marked, or as it is.
+    if (review && reviewHooks.descDiff(q.id) !== null) {
+      bg.add(
+        new PanelButton(Transform.at(Align.TOP_LEFT, btnOffset, 10, 16, 16), {
+          icon: icon('desc'),
+          iconColor: staticColor(STATUS_COLOR.changed),
+          tooltip: [showDescDiff ? 'Showing the description\'s changes' : 'Showing the description as it is', '§7Click to switch'],
+          onClick: () => {
+            showDescDiff = !showDescDiff;
+            this.host.refresh();
+          },
         }),
       );
     }
@@ -188,7 +243,14 @@ export class QuestScreen extends Screen {
         hasReward ? new Transform([0, 0, 0.5, 0.5], [0, 0, 16, 16]) : new Transform(Align.HALF_LEFT, [0, 0, 16, 0]),
       ),
     ));
-    const text = this.q!.desc;
+    const diff = showDescDiff && reviewHooks.active() ? reviewHooks.descDiff(this.q!.id) : null;
+    const text = diff ?? this.q!.desc;
+    const descMark = reviewHooks.active() ? reviewHooks.areaMark(this.q!.id, 'desc') : null;
+    if (descMark !== null) {
+      cvInner.add(
+        new PanelOutline(hasReward ? new Transform([0, 0, 0.5, 0.5], [0, 0, 16, 16]) : new Transform(Align.HALF_LEFT, [0, 0, 16, 0]), descMark),
+      );
+    }
     let last = 0;
     let y = 0;
     const panels: Panel[] = [];
@@ -236,7 +298,8 @@ export class QuestScreen extends Screen {
     cs.scrollY = bar;
     let y = 0;
     const panels: Panel[] = [];
-    for (const r of q.rewards) {
+    q.rewards.forEach((r, i) => {
+      const top = y;
       const title = new PanelTextBox(Transform.at([0, 0, 0, 0], 0, y, rect.w(), 12), typeName(r.type, 'reward'));
       title.setColor(col('text_header')).setAlignment(1);
       panels.push(title);
@@ -249,7 +312,9 @@ export class QuestScreen extends Screen {
         panels.push(wrap);
         y += wrap.transform.h();
       }
-    }
+      const m = reviewHooks.active() ? reviewHooks.areaMark(q.id, 'reward', i) : null;
+      if (m !== null) panels.push(new PanelOutline(new Rect(0, top, rect.w(), y - top, -1), m, 1, -1));
+    });
     cs.addAll(panels);
     cs.setScrollY(this.pos().reward);
     cs.updatePanelScroll();
@@ -265,6 +330,7 @@ export class QuestScreen extends Screen {
     const logic = String(prop(q, 'taskLogic'));
     const panels: Panel[] = [];
     q.tasks.forEach((t, i) => {
+      const top = y;
       const title = new PanelTextBox(Transform.at([0, 0, 0, 0], 0, y, rect.w(), 12), `${i + 1}. ${typeName(t.type, 'task')}`);
       title.setColor(col('text_header')).setAlignment(1);
       panels.push(title);
@@ -280,6 +346,8 @@ export class QuestScreen extends Screen {
         panels.push(wrap);
         y += wrap.transform.h() + 5;
       }
+      const m = reviewHooks.active() ? reviewHooks.areaMark(q.id, 'task', i) : null;
+      if (m !== null) panels.push(new PanelOutline(new Rect(0, top, rect.w() - 15, y - top - 3, -1), m, 1, -1));
       if (logic === 'OR' && i < q.tasks.length - 1) {
         y += 10;
         panels.push(

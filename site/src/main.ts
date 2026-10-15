@@ -24,6 +24,9 @@ import { setGameNames } from './screens/taskPanels.ts';
 import { loadPrefs } from './prefs.ts';
 import { setRefresh, startEditing, editKey } from './edit/session.ts';
 import { EditsScreen } from './screens/edits.ts';
+import { ReviewScreen, ReviewPickerScreen } from './screens/review.ts';
+import { installReview } from './review/install.ts';
+import { startReview } from './review/session.ts';
 
 const SITE_TITLE = 'GTNH Questbook';
 const canvas = document.getElementById('gui') as HTMLCanvasElement;
@@ -80,7 +83,19 @@ async function start() {
     if (editKey(e)) e.preventDefault();
   }, true);
   if (prefs.editMode) void startEditing();
+  // Review mode (a modpack pull request); ?pr=<number> in the address starts it.
+  installReview(() => host.refresh());
 
+  host.navigateToLine = (from, lineId) => {
+    let s: Screen | null = from;
+    while (s && !(s instanceof QuestLinesScreen)) s = s.parent;
+    if (s instanceof QuestLinesScreen) {
+      host.show(s, false);
+      const l = s.lineById(lineId);
+      if (l) s.openQuestLine(l);
+      host.notify(s);
+    } else host.show(new QuestLinesScreen(null, lineId), true);
+  };
   host.navigateToQuestOnMap = (from, questId, lineId) => {
     let s: Screen | null = from;
     while (s && !(s instanceof QuestLinesScreen)) s = s.parent;
@@ -186,6 +201,17 @@ async function start() {
       const lines = new QuestLinesScreen(null);
       lines.host = host;
       host.show(new EditsScreen(lines), false);
+      return;
+    }
+    if (kind === 'review') {
+      const lines = new QuestLinesScreen(null);
+      lines.host = host;
+      const n = Number(arg);
+      if (Number.isInteger(n) && n > 0) {
+        if (host.screen instanceof ReviewScreen && host.screen.n === n) return;
+        host.show(new ReviewScreen(lines, n), false);
+        void startReview(n);
+      } else host.show(new ReviewPickerScreen(lines), false);
       return;
     }
     if (kind === 'settings') {
