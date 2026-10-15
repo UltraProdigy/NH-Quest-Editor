@@ -5,10 +5,10 @@ import type { QuestLine, Quest } from '../lib/model.ts';
 
 /** Colours of added, removed, changed and moved things. */
 export const STATUS_COLOR = {
-  added: 0xff55ff55,
-  removed: 0xffff5555,
-  changed: 0xffffcc33,
-  moved: 0xff55ccff,
+  added: 0xff2eb82e,
+  removed: 0xffe03030,
+  changed: 0xff2f7cf6,
+  moved: 0xffb04ce0,
 } as const;
 
 export interface Mark {

@@ -35,7 +35,7 @@ export function installReview(refresh: () => void) {
     const q = questItem(questId);
     const e = lineId ? placementItem(lineId, questId) : undefined;
     if (!q && !e) return [];
-    const out = [`§6Changed in PR #${reviewing.number}:`];
+    const out = [`§bChanged in PR #${reviewing.number}:`];
     if (q?.status === 'added') out.push('§aNew quest');
     if (q?.status === 'removed') out.push('§cQuest removed');
     if (e?.status === 'added') out.push('§aPlaced in this line');

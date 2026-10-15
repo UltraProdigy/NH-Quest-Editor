@@ -18,9 +18,10 @@ changes quests or type any number. Every change is listed with a checkbox, group
 line, and marked in the questbook itself:
 
 - quest lines with changes show how many in the list;
-- on the map, changed quests are outlined (green new, yellow changed, blue moved) and quests
+- on the map, changed quests are outlined (green new, blue changed, purple moved) and quests
   that were removed or moved show as dashed outlines where they were;
-- in a quest, changed tasks, rewards, prerequisites and properties are outlined, and the
+- in a quest, changed tasks and rewards are tinted with their title in colour, a bar beside
+  the description and lines under the name and buttons mark other changes, and the
   description shows added words underlined in green and removed words struck out in red;
 - B (or the button in the side bar) switches between the questbook before and after the pull
   request.

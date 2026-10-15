@@ -17,11 +17,15 @@ import { quest as getQuest, prop, dependantsOf, isInAnyLine, shortId } from '../
 import type { Quest } from '../lib/model.ts';
 import { taskPanel, rewardPanel, typeName } from './taskPanels.ts';
 import { PropertiesScreen } from './properties.ts';
-import { PanelOutline } from './questCanvas.ts';
+import { PanelFill } from './questCanvas.ts';
 import { reviewHooks, STATUS_COLOR, type QuestArea } from '../review/hooks.ts';
 
 const mono = (s: string) => (forceMonochrome ? stripFormatting(s) : s);
 const IMG = /\[img height=([1-9]\d*)\] *(.*?:.*?) *\[\/img\]/g;
+
+/** " - changed" / " - new" / " - removed" after a task or reward title in review mode. */
+const changeWord = (m: number | null) =>
+  m === null ? '' : m === STATUS_COLOR.added ? ' - new' : m === STATUS_COLOR.removed ? ' - removed' : ' - changed';
 
 /** Review mode: show the description with its changes marked (else the new text). */
 let showDescDiff = true;
@@ -79,13 +83,13 @@ export class QuestScreen extends Screen {
     const review = reviewHooks.active();
     const mark = (area: QuestArea, index?: number) => (review ? reviewHooks.areaMark(q.id, area, index) : null);
     if (review) {
-      // The whole quest is new or gone: frame the screen; a changed name: frame the name.
+      // Changes are marked beside the content, never over it: a line under the name and the
+      // buttons, a bar beside the description, a tint behind tasks and rewards.
       const whole = reviewHooks.questStatus(q.id);
-      if (whole !== null) bg.add(new PanelOutline(new Transform(Align.FULL_BOX, [4, 4, 4, 4]), whole, 2, 0));
       const nameMark = mark('name');
       if (nameMark !== null) {
         const w = stringWidth(q.name);
-        bg.add(new PanelOutline(Transform.at(Align.TOP_CENTER, -Math.ceil(w / 2) - 3, 13, w + 6, 13), nameMark));
+        bg.add(new PanelFill(Transform.at(Align.TOP_CENTER, -Math.ceil(w / 2), 26, w, 2), nameMark));
       }
       const changes = reviewHooks.questTooltip(q.id, undefined, true);
       if (changes.length) {
@@ -98,7 +102,8 @@ export class QuestScreen extends Screen {
           }),
         );
         const which = reviewHooks.showingBefore() ? '§cbefore' : '§2after';
-        bg.add(new PanelTextBox(Transform.at(Align.TOP_RIGHT, -136, 14, 100, 10), `${which}§r §7(B)`).setAlignment(2).setColor(col('text_main')));
+        const what = whole === STATUS_COLOR.added ? '§2new quest§r, ' : whole === STATUS_COLOR.removed ? '§4removed quest§r, ' : '';
+        bg.add(new PanelTextBox(Transform.at(Align.TOP_RIGHT, -236, 14, 200, 10), `${what}${which}§r §7(B)`).setAlignment(2).setColor(col('text_main')));
       }
     }
 
@@ -111,7 +116,7 @@ export class QuestScreen extends Screen {
       }),
     );
     const propMark = mark('prop');
-    if (propMark !== null) bg.add(new PanelOutline(Transform.at(Align.BOTTOM_CENTER, 0, -16, 100, 16), propMark));
+    if (propMark !== null) bg.add(new PanelFill(Transform.at(Align.BOTTOM_CENTER, 2, -19, 96, 2), propMark));
 
     bg.add(
       new PanelButton(Transform.at(Align.TOP_LEFT, 16, 10, 16, 16), {
@@ -132,7 +137,7 @@ export class QuestScreen extends Screen {
           active: deps.length > 0,
         }),
       );
-      if (preMark !== null) bg.add(new PanelOutline(Transform.at(Align.TOP_LEFT, btnOffset, 10, 16, 16), preMark));
+      if (preMark !== null) bg.add(new PanelFill(Transform.at(Align.TOP_LEFT, btnOffset + 2, 27, 12, 2), preMark));
       btnOffset += 18;
     }
     const dependants = this.dependants();
@@ -247,9 +252,8 @@ export class QuestScreen extends Screen {
     const text = diff ?? this.q!.desc;
     const descMark = reviewHooks.active() ? reviewHooks.areaMark(this.q!.id, 'desc') : null;
     if (descMark !== null) {
-      cvInner.add(
-        new PanelOutline(hasReward ? new Transform([0, 0, 0.5, 0.5], [0, 0, 16, 16]) : new Transform(Align.HALF_LEFT, [0, 0, 16, 0]), descMark),
-      );
+      // A bar in the margin left of the description.
+      cvInner.add(new PanelFill(hasReward ? new Transform([0, 0, 0, 0.5], [-7, 0, 4, 16]) : new Transform(Align.LEFT_EDGE, [-7, 0, 4, 0]), descMark));
     }
     let last = 0;
     let y = 0;
@@ -300,8 +304,9 @@ export class QuestScreen extends Screen {
     const panels: Panel[] = [];
     q.rewards.forEach((r, i) => {
       const top = y;
-      const title = new PanelTextBox(Transform.at([0, 0, 0, 0], 0, y, rect.w(), 12), typeName(r.type, 'reward'));
-      title.setColor(col('text_header')).setAlignment(1);
+      const m = reviewHooks.active() ? reviewHooks.areaMark(q.id, 'reward', i) : null;
+      const title = new PanelTextBox(Transform.at([0, 0, 0, 0], 0, y, rect.w(), 12), typeName(r.type, 'reward') + changeWord(m));
+      title.setColor(m !== null ? staticColor(m) : col('text_header')).setAlignment(1);
       panels.push(title);
       y += 12;
       const gui = rewardPanel(r, Transform.at(Align.FULL_BOX, 0, 0, rect.w(), rect.h(), 111), (x) => this.openQuest(x));
@@ -312,8 +317,7 @@ export class QuestScreen extends Screen {
         panels.push(wrap);
         y += wrap.transform.h();
       }
-      const m = reviewHooks.active() ? reviewHooks.areaMark(q.id, 'reward', i) : null;
-      if (m !== null) panels.push(new PanelOutline(new Rect(0, top, rect.w(), y - top, -1), m, 1, -1));
+      if (m !== null) panels.push(new PanelFill(new Rect(0, top, rect.w() - 8, y - top, 2), m, 0x30));
     });
     cs.addAll(panels);
     cs.setScrollY(this.pos().reward);
@@ -331,8 +335,9 @@ export class QuestScreen extends Screen {
     const panels: Panel[] = [];
     q.tasks.forEach((t, i) => {
       const top = y;
-      const title = new PanelTextBox(Transform.at([0, 0, 0, 0], 0, y, rect.w(), 12), `${i + 1}. ${typeName(t.type, 'task')}`);
-      title.setColor(col('text_header')).setAlignment(1);
+      const m = reviewHooks.active() ? reviewHooks.areaMark(q.id, 'task', i) : null;
+      const title = new PanelTextBox(Transform.at([0, 0, 0, 0], 0, y, rect.w(), 12), `${i + 1}. ${typeName(t.type, 'task')}${changeWord(m)}`);
+      title.setColor(m !== null ? staticColor(m) : col('text_header')).setAlignment(1);
       panels.push(title);
       y += 10;
       const gui = taskPanel(t, Transform.at(Align.FULL_BOX, 10, 10, rect.w(), rect.h(), 0));
@@ -346,8 +351,11 @@ export class QuestScreen extends Screen {
         panels.push(wrap);
         y += wrap.transform.h() + 5;
       }
-      const m = reviewHooks.active() ? reviewHooks.areaMark(q.id, 'task', i) : null;
-      if (m !== null) panels.push(new PanelOutline(new Rect(0, top, rect.w() - 15, y - top - 3, -1), m, 1, -1));
+      if (m !== null) {
+        // A tint behind the task and a bar in the gap right of its frame.
+        panels.push(new PanelFill(new Rect(0, top, rect.w() - 15, y - top - 3, 2), m, 0x30));
+        panels.push(new PanelFill(new Rect(rect.w() - 13, top, 3, y - top - 3, 2), m));
+      }
       if (logic === 'OR' && i < q.tasks.length - 1) {
         y += 10;
         panels.push(

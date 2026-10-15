@@ -42,19 +42,18 @@ export function outline(gfx: Gfx, x: number, y: number, w: number, h: number, ar
 /** The colour pulsing between full and half strength, so marks catch the eye. */
 const pulse = (argb: number, dim: boolean, now: number) => {
   if (dim) return ((0x60 << 24) | (argb & 0xffffff)) >>> 0;
-  const a = Math.round(0xb0 + 0x4f * (0.5 + 0.5 * Math.sin(now / 250)));
+  const a = Math.round(0xc8 + 0x37 * (0.5 + 0.5 * Math.sin(now / 250)));
   return ((a << 24) | (argb & 0xffffff)) >>> 0;
 };
 
-/** Outline drawn around a panel's rectangle (a change in review mode). */
-export class PanelOutline extends PanelGeneric {
-  constructor(rect: import('../gui/core.ts').GuiRect, public argb: number, public thickness = 1, public pad = 1) {
+/** A filled rectangle (review mode's bars and tints), `alpha` 0-255 over the colour. */
+export class PanelFill extends PanelGeneric {
+  constructor(rect: import('../gui/core.ts').GuiRect, public argb: number, public alpha = 255) {
     super(rect, null);
   }
   draw(gfx: Gfx) {
     const r = this.transform;
-    animating();
-    outline(gfx, r.x() - this.pad, r.y() - this.pad, r.w() + 2 * this.pad, r.h() + 2 * this.pad, pulse(this.argb, false, gfx.now), this.thickness);
+    gfx.fill(r.x(), r.y(), r.w(), r.h(), ((this.alpha << 24) | (this.argb & 0xffffff)) >>> 0);
   }
 }
 
@@ -132,7 +131,7 @@ export class PanelButtonQuest extends PanelButton {
     if (this.mark) {
       const r = this.transform;
       if (!this.mark.dim) animating();
-      outline(gfx, r.x() - 1, r.y() - 1, r.w() + 2, r.h() + 2, pulse(this.mark.color, this.mark.dim, gfx.now), 2);
+      outline(gfx, r.x() - 2, r.y() - 2, r.w() + 4, r.h() + 4, pulse(this.mark.color, this.mark.dim, gfx.now), 2);
     }
     const q = this.q;
     if (q && mapSettings.markHidden) {

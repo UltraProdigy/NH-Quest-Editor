@@ -121,7 +121,7 @@ export class QuestLinesScreen extends Screen {
     bg.add(
       new PanelButton(Transform.at(Align.BOTTOM_LEFT, 8, -56, 32, 16), {
         icon: icon('notice'),
-        iconColor: reviewHooks.active() ? pulseColor(staticColor(0xffffcc33), WHITE, 2, 0) : null,
+        iconColor: reviewHooks.active() ? pulseColor(staticColor(0xff2f7cf6), WHITE, 2, 0) : null,
         tooltip: reviewHooks.active()
           ? [`Reviewing ${reviewHooks.label()}`, '§7The changes, with a checkbox each']
           : ['Review a pull request', '§7See a modpack pull request\'s quest changes'],
@@ -383,11 +383,11 @@ export class QuestLinesScreen extends Screen {
       this.lineButtons.push({ btn, line: l });
       const changes = reviewHooks.active() ? reviewHooks.lineCount(l.id) : 0;
       if (changes) {
-        const t = new PanelTextBox(new Rect(16, row * 16 + 4, listW - 20, 12, -1), `§6${changes}`);
+        const t = new PanelTextBox(new Rect(16, row * 16 + 4, listW - 20, 12, -1), `§b${changes}`);
         t.setAlignment(2);
         t.shadow = true;
         panels.push(t);
-        btn.tooltipLines = [mono(l.name), `§6${changes} change${changes === 1 ? '' : 's'} in ${reviewHooks.label()}`];
+        btn.tooltipLines = [mono(l.name), `§b${changes} change${changes === 1 ? '' : 's'} in ${reviewHooks.label()}`];
       }
       row++;
     }
@@ -415,7 +415,7 @@ export class QuestLinesScreen extends Screen {
     const review = reviewHooks.active() ? reviewHooks.lineCount(this.selectedLine.id) : 0;
     this.txCompletion.setText(
       reviewHooks.active()
-        ? `§6${reviewHooks.label()}§r: ${review} change${review === 1 ? '' : 's'} here`
+        ? `§9${reviewHooks.label()}§r: ${review} change${review === 1 ? '' : 's'} here`
         : tr('betterquesting.title.completion', 0, total, '0.00'),
     );
   }

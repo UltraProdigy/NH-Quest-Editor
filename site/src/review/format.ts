@@ -9,7 +9,7 @@ import { typeName } from '../screens/taskPanels.ts';
 import { isItem, isFluid, type FieldChange, type ReviewItem, type ItemStatus } from './diff.ts';
 import { reviewing } from './session.ts';
 
-export const STATUS_CODE: Record<ItemStatus, string> = { added: '§a', removed: '§c', changed: '§6', moved: '§3' };
+export const STATUS_CODE: Record<ItemStatus, string> = { added: '§2', removed: '§c', changed: '§9', moved: '§5' };
 const STATUS_SIGN: Record<ItemStatus, string> = { added: '+', removed: '-', changed: '~', moved: '>' };
 
 const books = (): QuestbookData[] => {

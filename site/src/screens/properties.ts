@@ -106,7 +106,7 @@ export class PropertiesScreen extends Screen {
     for (const [key, label] of LABELS) {
       // Review mode: changed properties in colour, with the other version.
       const other = reviewHooks.active() ? reviewHooks.propBefore(q.id, key) : null;
-      if (other !== null) pair(`§6${label}`, `${fmt(key, prop(q, key))} §7(${reviewHooks.showingBefore() ? 'after' : 'was'}: ${other})`);
+      if (other !== null) pair(`§9${label}`, `${fmt(key, prop(q, key))} §7(${reviewHooks.showingBefore() ? 'after' : 'was'}: ${other})`);
       else pair(label, fmt(key, prop(q, key)));
     }
 
