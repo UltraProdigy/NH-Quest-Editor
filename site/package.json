@@ -16,7 +16,8 @@
     "data:quests": "node scripts/build-quests.ts",
     "data:items": "node scripts/build-items.ts",
     "data:recipes": "node scripts/build-recipes.ts",
-    "data:presets": "python3 scripts/extract-bq-presets.py"
+    "data:presets": "python3 scripts/extract-bq-presets.py",
+    "review": "node scripts/review-pr.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
