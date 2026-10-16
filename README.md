@@ -7,8 +7,25 @@ recipes come from a headless export of the latest GTNH daily build.
 Click any item in a quest to see its recipes in an NEI-style window (right click for its uses).
 Crafting, smelting and all GregTech recipe maps are shown so far.
 
-Planned next: more recipe handlers and an item list, then editing quests in the browser and
-exporting the changes as a pull request.
+Planned next: more recipe handlers.
+
+## Editing quests
+
+Edit mode (Settings) turns the site into BetterQuesting's editor, as `/bq_admin edit` does in
+game, with the same screens: the quest editor (Edit in a quest: name, description and the text
+editor, icon, visibility, logic, notification settings and the raw NBT), the task, reward and
+prerequisite editors, the quest line editor (the gear at the bottom left) with its Add/Remove
+Quests screen, and the designer (next to it) with the toolbox: open, new, grab, link, copy,
+scale, delete, remove, icon and frame, grid snap and box selection.
+
+Every change is one undo step (Ctrl + Z, Ctrl + Y) and is kept in the browser. The Edits screen
+(the brush at the bottom left) lists the changes and downloads them as the changed files or as a
+git patch for a pull request to the modpack. The files are written as BetterQuesting would save
+them after the same edit in game, so the pull request only holds the real changes.
+
+The browser has no player or world, so a few things work differently: items are picked from
+NEI's item list (NEI's bookmarks stand in for the inventory), mobs are saved by id only, and the
+progress tools, importers and the notification preview are off.
 
 ## Reviewing pull requests
 
@@ -46,6 +63,7 @@ proxy).
 site/        the website (TypeScript + Vite, no framework; the GUI is drawn on a <canvas>)
   src/gui/       port of BetterQuesting's GUI toolkit: themes, panels, Minecraft font
   src/screens/   questbook screens: quest lines, quest, search, properties, settings
+    editor/        BetterQuesting's editor screens: quest, tasks, prerequisites, lines, designer
   src/nei/       NEI's recipe window and its handlers (crafting, smelting, GregTech)
   src/edit/      edit mode: the quest files as a database with undo, autosave and exports
   src/review/    review mode: a modpack pull request's quest changes, fetched from GitHub

@@ -17,6 +17,8 @@ import { quest as getQuest, prop, dependantsOf, isInAnyLine, shortId } from '../
 import type { Quest } from '../lib/model.ts';
 import { taskPanel, rewardPanel, typeName } from './taskPanels.ts';
 import { PropertiesScreen } from './properties.ts';
+import { canEdit } from './editor/common.ts';
+import { QuestEditorScreen } from './editor/questEditor.ts';
 import { PanelFill } from './questCanvas.ts';
 import { reviewHooks, STATUS_COLOR, type QuestArea } from '../review/hooks.ts';
 
@@ -107,13 +109,13 @@ export class QuestScreen extends Screen {
       }
     }
 
-    // The site acts like an editor's view: Back plus a (read-only) properties button.
+    // The site acts like an editor's view: Back plus a (read-only) properties button, or in edit
+    // mode BetterQuesting's Edit button.
     bg.add(new PanelButton(Transform.at(Align.BOTTOM_CENTER, -100, -16, 100, 16), { text: tr('gui.back'), onClick: () => this.host.back() }));
     bg.add(
-      new PanelButton(Transform.at(Align.BOTTOM_CENTER, 0, -16, 100, 16), {
-        text: 'Properties',
-        onClick: () => this.host.show(new PropertiesScreen(this, this.questId)),
-      }),
+      new PanelButton(Transform.at(Align.BOTTOM_CENTER, 0, -16, 100, 16), canEdit()
+        ? { text: tr('betterquesting.btn.edit'), onClick: () => this.host.show(new QuestEditorScreen(this, this.questId)) }
+        : { text: 'Properties', onClick: () => this.host.show(new PropertiesScreen(this, this.questId)) }),
     );
     const propMark = mark('prop');
     if (propMark !== null) bg.add(new PanelFill(Transform.at(Align.BOTTOM_CENTER, 2, -19, 96, 2), propMark));

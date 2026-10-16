@@ -5,7 +5,7 @@ import { fetchJson, siteUrl, image } from '../gui/assets.ts';
 import { type Gfx, keys as heldKeys } from '../gui/core.ts';
 import { animating, invalidate } from '../gui/frame.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
-import { drawItemKey, itemInfo, preloadIcons } from '../gui/items.ts';
+import { drawItemKey, itemInfo, preloadIcons, itemFallback } from '../gui/items.ts';
 import type { NeiItems, NeiHandlers, NeiHandler, NeiRecipe, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiList, NeiTooltips } from './model.ts';
 import { shardOf } from './model.ts';
 
@@ -33,6 +33,12 @@ export function loadNei(): Promise<boolean> {
       fuels = hs.fuels ?? [];
       pics = hs.pics ?? [];
       keyIndex = new Map(it.keys.map((k, i) => [k, i]));
+      itemFallback.draw = drawNeiKey;
+      itemFallback.name = (key) => {
+        const i = itemIndexOf(key);
+        return i === undefined ? undefined : it.names[i];
+      };
+      invalidate();
       oreOf = new Map();
       it.ore.forEach(([, members], o) => {
         for (const m of members) {
@@ -378,6 +384,25 @@ export function drawNeiItem(gfx: Gfx, i: number, x: number, y: number, label = '
     }
   } else drawItemKey(gfx, key, x, y, 16);
   if (label) drawStackLabel(gfx, label, x, y);
+}
+
+/** Draw an item by key at any slot size from NEI's icon sheets; false when NEI has no icon for it. */
+function drawNeiKey(gfx: Gfx, key: string, x: number, y: number, size: number): boolean {
+  const i = itemIndexOf(key);
+  if (i === undefined || !items || items.icons[i] < 0) return false;
+  gfx.push();
+  gfx.translate(x, y);
+  gfx.scale(size / 16);
+  const cell = items.icons[i];
+  const sheet = Math.floor(cell / 256), n = cell % 256;
+  const px = items.sheets[sheet];
+  const img = image(siteUrl(`${DIR}icons/${sheet}.png`));
+  if (img) {
+    const cols = img.width / px;
+    gfx.icon(img, (n % cols) * px, Math.floor(n / cols) * px, px, px, -8, -8, 32, 32);
+  }
+  gfx.pop();
+  return true;
 }
 
 /** RenderItem.renderItemOverlayIntoGUI's stack size text. */

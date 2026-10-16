@@ -217,16 +217,19 @@ export class EditDocument {
     return this.redoStack[this.redoStack.length - 1]?.label ?? null;
   }
 
-  /** Write objects in the given order, the quest line order last (it needs the lines to exist). */
+  /**
+   * Write objects: lines, settings and quests first, then placements (their line has to exist),
+   * then the quest line order; otherwise in the given order, so placements keep their order.
+   */
   private apply(entries: [ObjectKey, string | null][]) {
-    for (const [k, v] of entries) if (k !== ORDER_KEY) this.write(k, v);
-    for (const [k, v] of entries) if (k === ORDER_KEY) this.write(k, v);
+    const rank = (k: string) => ({ l: 0, s: 0, q: 0, e: 1, o: 2 })[k[0]] ?? 3;
+    for (const [k, v] of [...entries].sort((a, b) => rank(a[0]) - rank(b[0]))) this.write(k, v);
   }
 
   undo(): boolean {
     const c = this.undoStack.pop();
     if (!c) return false;
-    this.apply([...c.before].reverse());
+    this.apply([...c.before]);
     this.redoStack.push(c);
     this.changed();
     return true;

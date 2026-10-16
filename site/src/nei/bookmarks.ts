@@ -142,6 +142,8 @@ function changed() {
 }
 
 export const bookmarksHidden = () => store.hidden;
+/** The items bookmarked in the open space, in order, each once. */
+export const bookmarkedKeys = (): string[] => [...new Set(space().items.map((b) => b.k))];
 export function toggleBookmarks() {
   store.hidden = !store.hidden;
   save();

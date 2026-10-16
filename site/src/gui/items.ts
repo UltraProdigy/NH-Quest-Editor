@@ -33,6 +33,8 @@ export async function loadItems() {
 }
 
 export const hasItemIndex = () => index !== null;
+/** Every key of the quest item index ("id@meta", "id@meta#hash", "fluid:name"). */
+export const itemIndexKeys = (): string[] => (index ? Object.keys(index.items) : []);
 export const itemIndexSource = () => index?.source ?? null;
 
 function lookup(key: string): ItemInfo | undefined {
@@ -75,6 +77,8 @@ export function itemName(ref: ItemRef | string): string {
   const key = typeof ref === 'string' ? ref : refKey(ref);
   const info = lookup(key);
   if (info) return info.n;
+  const other = itemFallback.name(key);
+  if (other !== undefined) return other;
   if (typeof ref !== 'string' && ref.dmg === WILDCARD) {
     const v = variants(ref);
     const first = v.length ? lookup(v[0]) : undefined;
@@ -132,6 +136,15 @@ function iconInfo(key: string): ItemInfo | undefined {
   return lookup(key.replace(/#.*$/, ''));
 }
 
+/**
+ * Items the quest index does not cover (picked in the editor) can still be drawn and named from
+ * NEI's item table once that is loaded. Installed by nei/data.ts.
+ */
+export const itemFallback = {
+  draw: (_gfx: Gfx, _key: string, _x: number, _y: number, _size: number): boolean => false,
+  name: (_key: string): string | undefined => undefined,
+};
+
 function drawPlaceholder(gfx: Gfx, x: number, y: number, size: number) {
   // Shown when no icon exists: a faint frame with a question mark.
   gfx.fill(x + size * 0.125, y + size * 0.125, size * 0.75, size * 0.75, 0x40000000);
@@ -152,7 +165,7 @@ export function drawItemKey(gfx: Gfx, key: string, x: number, y: number, size = 
   // Exported icons are a 32-unit canvas with the 16-unit item in the middle (room for renders
   // that spill out of their slot), so the slot is the centre half of the image.
   if (img && info) drawIcon(gfx, img, info, x, y, size);
-  else drawPlaceholder(gfx, x, y, size);
+  else if (!itemFallback.draw(gfx, key, x, y, size)) drawPlaceholder(gfx, x, y, size);
   if (text) {
     gfx.push();
     gfx.translate(x, y);

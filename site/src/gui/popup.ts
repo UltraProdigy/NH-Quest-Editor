@@ -16,7 +16,7 @@ interface Entry {
 }
 
 /** Background that grows from nothing to its size (CanvasResizeable + lerpToRect). */
-class GrowingCanvas extends CanvasEmpty {
+export class GrowingCanvas extends CanvasEmpty {
   lerp: RectLerp;
   target: Rect;
   constructor(target: Rect, public bg: GuiTexture) {

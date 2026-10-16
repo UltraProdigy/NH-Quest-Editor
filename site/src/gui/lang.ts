@@ -25,6 +25,7 @@ const VANILLA: Record<string, string> = {
   'gui.no': 'No',
   'gui.done': 'Done',
   'gui.cancel': 'Cancel',
+  'container.inventory': 'Inventory',
 };
 
 /** java.lang.String.format subset: %s, %d, %n$s, %%. */

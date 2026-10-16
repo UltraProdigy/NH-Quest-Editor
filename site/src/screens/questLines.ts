@@ -22,6 +22,9 @@ import { SettingsScreen } from './settings.ts';
 import { SearchScreen } from './search.ts';
 import { loadPrefs, savePrefs } from '../prefs.ts';
 import { editing } from '../edit/session.ts';
+import { canEdit } from './editor/common.ts';
+import { QuestLinesEditorScreen } from './editor/lineEditor.ts';
+import { DesignerScreen } from './editor/designer.ts';
 import { EditsScreen } from './edits.ts';
 import { reviewHooks } from '../review/hooks.ts';
 
@@ -128,10 +131,27 @@ export class QuestLinesScreen extends Screen {
         onClick: () => reviewHooks.open(this),
       }),
     );
-    // In edit mode: the site's edits (undo, redo, downloads).
+    // In edit mode: BetterQuesting's editor buttons (quest lines and the designer), and the
+    // site's edits (undo, redo, downloads).
     if (editing.on) {
+      if (canEdit()) {
+        bg.add(
+          new PanelButton(Transform.at(Align.BOTTOM_LEFT, 8, -72, 16, 16), {
+            icon: icon('gear'),
+            tooltip: [tr('betterquesting.btn.edit')],
+            onClick: () => this.host.show(new QuestLinesEditorScreen(this, this.selectedLine?.id)),
+          }),
+        );
+        bg.add(
+          new PanelButton(Transform.at(Align.BOTTOM_LEFT, 24, -72, 16, 16), {
+            icon: icon('sort'),
+            tooltip: [tr('betterquesting.btn.designer')],
+            onClick: () => this.selectedLine && this.host.show(new DesignerScreen(this, this.selectedLine.id)),
+          }),
+        );
+      }
       bg.add(
-        new PanelButton(Transform.at(Align.BOTTOM_LEFT, 8, -72, 32, 16), {
+        new PanelButton(Transform.at(Align.BOTTOM_LEFT, 8, -88, 32, 16), {
           icon: icon('paint'),
           tooltip: ['Edits', '§7Undo, redo and download your changes'],
           onClick: () => this.host.show(new EditsScreen(this)),

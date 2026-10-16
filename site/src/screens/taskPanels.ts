@@ -63,7 +63,9 @@ export function setGameNames(dims: Record<string, string> | undefined, entities:
   entityNames = entities ?? {};
 }
 const dimName = (d: number) => extraDims[String(d)] ?? DIMENSIONS[d] ?? String(d);
-const entityName = (id: string) => entityNames[id] ?? (id.includes('.') ? id.slice(id.indexOf('.') + 1) : id);
+/** Entity ids the game data names (for the entity selection). */
+export const entityIds = () => Object.keys(entityNames);
+export const entityName = (id: string) => entityNames[id] ?? (id.includes('.') ? id.slice(id.indexOf('.') + 1) : id);
 
 export function taskPanel(task: TaskData, rect: GuiRect): Panel | null {
   switch (task.type) {

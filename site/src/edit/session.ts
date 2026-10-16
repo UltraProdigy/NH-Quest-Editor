@@ -7,6 +7,7 @@ import type { QuestbookData } from '../lib/model.ts';
 import { book, setQuestbook } from '../store.ts';
 import { EditDocument, type RawBundle } from './document.ts';
 import { loadWork, saveWork } from './storage.ts';
+import { loadNei } from '../nei/data.ts';
 
 export const editing = {
   on: false,
@@ -80,6 +81,8 @@ export async function startEditing(): Promise<boolean> {
   editing.loading = true;
   editing.error = '';
   invalidate();
+  // Items picked in the editor are drawn and named from NEI's item table.
+  void loadNei();
   try {
     const bundle = await loadRawBundle();
     const doc = new EditDocument(bundle);
