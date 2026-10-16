@@ -102,7 +102,7 @@ interface ToolContext {
 const local = (c: CanvasQuestLine, mx: number, my: number): [number, number] => {
   const zs = c.zoom.read();
   const t = c.transform;
-  return [Math.trunc((mx - t.x()) / zs) + c.lsx, Math.trunc((my - t.y()) / zs) + c.lsy];
+  return [Math.floor((mx - t.x()) / zs + c.lsx), Math.floor((my - t.y()) / zs + c.lsy)];
 };
 
 /** The clicked button, or with a selection, the selection when the click is on it. */
@@ -462,6 +462,8 @@ class PanelToolController extends BasePanel {
     gfx.clip(t.x(), t.y(), t.w(), t.h());
     gfx.push();
     gfx.translate(t.x() - c.lsx * c.zoom.read(), t.y() - c.lsy * c.zoom.read());
+    gfx.ox = Math.round(gfx.ox);
+    gfx.oy = Math.round(gfx.oy);
     gfx.scale(c.zoom.read());
     if (this.selBounds) {
       this.selBounds.w = smx - this.selBounds.x;
@@ -516,6 +518,11 @@ class PanelToolController extends BasePanel {
 
   scroll() {
     return false;
+  }
+
+  /** A finger on the canvas uses the tool, as the mouse does; two fingers still pinch the view. */
+  touchDrag(mx: number, my: number, pinch = false) {
+    return !pinch && this.tool && contains(this.transform, mx, my) ? null : undefined;
   }
 
   key(e: KeyboardEvent) {

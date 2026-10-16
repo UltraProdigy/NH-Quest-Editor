@@ -9,7 +9,7 @@
 // dropdown (the "%" search does read the subsets), and the quantity (it only matters for cheating
 // items in, and for Ctrl + A).
 
-import { type Gfx, type TipLine, keys as heldKeys } from '../gui/core.ts';
+import { type Gfx, type TipLine, type TouchView, keys as heldKeys, pointer, softKeyboard, SwipePager } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
 import { animating, invalidate } from '../gui/frame.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
@@ -53,6 +53,70 @@ const state = {
   /** ItemHistoryPanel: the items whose recipes or usages were looked up, newest first. */
   history: [] as number[],
 };
+
+/**
+ * The search field types through a hidden input while touch is in use, so that phones bring up
+ * their keyboard (they only do for a real text field); with a keyboard the field takes the keys
+ * itself, as GuiTextField does.
+ */
+let kbInput: HTMLInputElement | null = null;
+
+function keyboardInput(): HTMLInputElement {
+  if (kbInput) return kbInput;
+  const el = (kbInput = document.createElement('input'));
+  el.type = 'text';
+  el.autocomplete = 'off';
+  el.spellcheck = false;
+  el.autocapitalize = 'off';
+  el.setAttribute('autocorrect', 'off');
+  el.enterKeyHint = 'search';
+  el.setAttribute('aria-label', 'Search items');
+  // 16 px text: Safari zooms the page into any field with smaller text when it gets focus.
+  Object.assign(el.style, {
+    position: 'fixed', left: '0', top: '0', width: '1px', height: '1px', opacity: '0', border: '0', padding: '0',
+    fontSize: '16px',
+  });
+  const sync = () => {
+    const s = el.value.replace(/[§\u0000-\u001f\u007f]/g, '').slice(0, 256);
+    applySearch(s);
+    const a = Math.min(el.selectionStart ?? s.length, s.length), b = Math.min(el.selectionEnd ?? a, s.length);
+    state.cursor = el.selectionDirection === 'backward' ? a : b;
+    state.selEnd = el.selectionDirection === 'backward' ? b : a;
+    invalidate();
+  };
+  el.addEventListener('input', sync);
+  el.addEventListener('select', sync);
+  el.addEventListener('keyup', sync);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'Escape') el.blur();
+    e.stopPropagation();
+  });
+  el.addEventListener('blur', () => {
+    if (!state.focused) return;
+    state.focused = false;
+    invalidate();
+  });
+  document.body.appendChild(el);
+  return el;
+}
+
+/** Put the search text and cursor into the hidden input (after a tap moved the cursor). */
+function syncKeyboard() {
+  if (!kbInput || document.activeElement !== kbInput) return;
+  if (kbInput.value !== state.search) kbInput.value = state.search;
+  const a = Math.min(state.cursor, state.selEnd), b = Math.max(state.cursor, state.selEnd);
+  kbInput.setSelectionRange(a, b, state.cursor < state.selEnd ? 'backward' : 'forward');
+}
+
+/** Set the search text (resetting the page, and loading tooltips for the search to read). */
+function applySearch(s: string) {
+  if (s === state.search) return;
+  state.search = s.slice(0, 256);
+  state.cursor = state.selEnd = Math.min(state.cursor, state.search.length);
+  state.page = 0;
+  if (state.search && !tooltipData()) void loadTooltips();
+  invalidate();
+}
 
 const HISTORY_ROWS = 2; // inventory.history.useRows
 const HISTORY_COLOR = 0xee555555; // inventory.history.historyColor
@@ -491,6 +555,7 @@ export class ItemPanelOverlay {
       this.setFocus(true);
       if (b === 1) this.setSearch('');
       else state.cursor = state.selEnd = cursorAt(state.search, mx - (sa.x + 2 + 4));
+      syncKeyboard();
       return true;
     }
     if (b === 0 && inside(this.bookmarks(), mx, my)) {
@@ -555,6 +620,13 @@ export class ItemPanelOverlay {
     invalidate();
   }
 
+  private pager = new SwipePager((d) => this.turn(d, this.numPages(shownItems().items.length)));
+
+  /** Touch: a swipe over the panel turns its pages, as the wheel does. */
+  touchDrag(mx: number, my: number): TouchView | undefined {
+    return inside(this.panel, mx, my) && !this.bookmarkPanel.contains(mx, my) ? this.pager : undefined;
+  }
+
   /** The wheel over the panel turns its pages. */
   scroll(mx: number, my: number, d: number): boolean {
     if (this.bookmarkPanel.scroll(mx, my, d)) return true;
@@ -602,15 +674,21 @@ export class ItemPanelOverlay {
   private setFocus(f: boolean) {
     if (f && !state.focused) state.focusFrame = performance.now();
     state.focused = f;
+    if (f && pointer.touch) {
+      // Called from the tap itself, which phones require before they show their keyboard.
+      const el = keyboardInput();
+      el.value = state.search;
+      el.focus({ preventScroll: true });
+      softKeyboard.field = () => {
+        if (!state.focused) return null;
+        const r = this.searchArea();
+        return [r.x, r.y, r.w, r.h];
+      };
+    } else if (!f && kbInput && document.activeElement === kbInput) kbInput.blur();
   }
 
   private setSearch(s: string) {
-    if (s === state.search) return;
-    state.search = s.slice(0, 256);
-    state.cursor = state.selEnd = Math.min(state.cursor, state.search.length);
-    state.page = 0;
-    if (state.search && !tooltipData()) void loadTooltips();
-    invalidate();
+    applySearch(s);
   }
 
   /** GuiTextField.textboxKeyTyped, as far as a search field needs it. */

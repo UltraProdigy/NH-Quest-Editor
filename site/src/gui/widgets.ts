@@ -2,7 +2,7 @@
 
 import {
   BasePanel, CanvasEmpty, type Gfx, type GuiRect, type Panel, type Tooltip, Rect, RectLerp, Transform, Align,
-  contains, mouseButtons, keys,
+  contains, mouseButtons, keys, type TouchView, touchDragChildren,
 } from './core.ts';
 import { type GuiColor, WHITE } from './color.ts';
 import { animating, redraw } from './frame.ts';
@@ -603,7 +603,7 @@ export class PanelVScrollBar extends BasePanel implements ValueIO {
 }
 
 /** Scrollable (and optionally zoomable) canvas (CanvasScrolling). Children use canvas coordinates. */
-export class CanvasScrolling extends BasePanel {
+export class CanvasScrolling extends BasePanel implements TouchView {
   children: Panel[] = [];
   scrollBounds = new Rect(0, 0, 0, 0);
   window = new Rect(0, 0, 0, 0);
@@ -627,6 +627,9 @@ export class CanvasScrolling extends BasePanel {
   lsz = 1;
   lsx = 0;
   lsy = 0;
+  /** Touch: the speed the view keeps after a flick (GUI pixels per millisecond), and its clock. */
+  private flingV: [number, number] | null = null;
+  private flingT = 0;
 
   setupAdvanceScroll(zoom: boolean, extended: boolean, margin: number) {
     this.zoomMode = zoom;
@@ -635,11 +638,16 @@ export class CanvasScrolling extends BasePanel {
     return this;
   }
 
+  // A zooming canvas keeps fractions of a canvas pixel, so that dragging and pinching follow the
+  // finger smoothly when one canvas pixel is many screen pixels; the drawing is still snapped to
+  // whole device pixels.
   getScrollX() {
-    return Math.round(this.scrollBounds.rx + this.scrollBounds.rw * this.scrollX.read());
+    const v = this.scrollBounds.rx + this.scrollBounds.rw * this.scrollX.read();
+    return this.zoomMode ? v : Math.round(v);
   }
   getScrollY() {
-    return Math.round(this.scrollBounds.ry + this.scrollBounds.rh * this.scrollY.read());
+    const v = this.scrollBounds.ry + this.scrollBounds.rh * this.scrollY.read();
+    return this.zoomMode ? v : Math.round(v);
   }
   setScrollX(sx: number) {
     if (this.scrollBounds.rw <= 0) return;
@@ -730,7 +738,7 @@ export class CanvasScrolling extends BasePanel {
   protected toLocal(mx: number, my: number): [number, number] {
     const zs = this.zoom.read();
     const t = this.transform;
-    return [Math.trunc((mx - t.x()) / zs) + this.lsx, Math.trunc((my - t.y()) / zs) + this.lsy];
+    return [Math.floor((mx - t.x()) / zs + this.lsx), Math.floor((my - t.y()) / zs + this.lsy)];
   }
 
   protected visible(): Panel[] {
@@ -749,8 +757,9 @@ export class CanvasScrolling extends BasePanel {
     const vw = Math.ceil(t.w() / zs), vh = Math.ceil(t.h() / zs);
     const tx = t.x(), ty = t.y();
     if (this.dragging && (mouseButtons[0] || mouseButtons[2])) {
-      const dx = Math.trunc((this.dragMX - mx) / zs);
-      const dy = Math.trunc((this.dragMY - my) / zs);
+      const fine = this.zoomMode ? (v: number) => v : Math.trunc;
+      const dx = fine((this.dragMX - mx) / zs);
+      const dy = fine((this.dragMY - my) / zs);
       if (this.scrollBounds.rw > 0) {
         this.scrollX.write(dx / this.scrollBounds.rw + this.dragSX);
         if (!this.dragged && Math.abs(this.dragSX - this.scrollX.read()) > 0.05) this.dragged = this.userMoved = true;
@@ -762,7 +771,7 @@ export class CanvasScrolling extends BasePanel {
     } else if (this.dragging || this.dragged) {
       this.dragging = false;
       this.dragged = false;
-    }
+    } else if (this.flingV) this.flingStep(gfx.now, zs);
 
     if (this.lsz !== zs) {
       const csx = this.getScrollX(), csy = this.getScrollY();
@@ -794,6 +803,8 @@ export class CanvasScrolling extends BasePanel {
     gfx.translate(tx, ty);
     gfx.scale(zs);
     gfx.translate(-this.lsx, -this.lsy);
+    gfx.ox = Math.round(gfx.ox);
+    gfx.oy = Math.round(gfx.oy);
     let [smx, smy] = this.toLocal(mx, my);
     if (!contains(t, mx, my)) smx = smy = -1e9;
     this.drawChildren(gfx, smx, smy);
@@ -807,6 +818,7 @@ export class CanvasScrolling extends BasePanel {
 
   mouseDown(mx: number, my: number, b: number) {
     if (!contains(this.transform, mx, my)) return false;
+    this.stopFling();
     const [smx, smy] = this.toLocal(mx, my);
     for (let i = this.children.length - 1; i >= 0; i--) {
       const c = this.children[i];
@@ -849,6 +861,7 @@ export class CanvasScrolling extends BasePanel {
       const c = this.children[i];
       if (c.enabled && c.scroll(smx, smy, d)) return true;
     }
+    this.stopFling();
     if (this.zoomMode) {
       const cs = this.zoom.readRaw();
       this.userMoved = true;
@@ -884,6 +897,92 @@ export class CanvasScrolling extends BasePanel {
       if (tt && tt.length) return tt;
     }
     return null;
+  }
+
+  // ---------------------------------------------------------------- touch
+
+  /** A finger drags the innermost canvas under it that can move, even when it pressed a button. */
+  touchDrag(mx: number, my: number, pinch = false): TouchView | null | undefined {
+    if (!contains(this.transform, mx, my)) return undefined;
+    const [smx, smy] = this.toLocal(mx, my);
+    const inner = touchDragChildren(this.visible(), smx, smy, pinch);
+    if (inner !== undefined) return inner;
+    if (pinch ? !this.zoomMode : !this.zoomMode && this.scrollBounds.rw <= 0 && this.scrollBounds.rh <= 0) return undefined;
+    return this;
+  }
+
+  get zoomable() {
+    return this.zoomMode;
+  }
+
+  beginDrag(mx: number, my: number) {
+    this.stopFling();
+    this.dragSX = this.scrollX.read();
+    this.dragSY = this.scrollY.read();
+    this.dragMX = mx;
+    this.dragMY = my;
+    this.dragging = true;
+    this.dragged = false;
+  }
+
+  endDrag(vx: number, vy: number) {
+    this.dragging = false;
+    this.dragged = false;
+    const speed = Math.hypot(vx, vy);
+    if (speed < 0.05) return;
+    // Very fast flicks are capped, so one does not throw the view out of sight.
+    const k = Math.min(1, 4 / speed);
+    this.flingV = [vx * k, vy * k];
+    this.flingT = performance.now();
+    animating(true);
+  }
+
+  stopFling() {
+    this.flingV = null;
+  }
+
+  /** One frame of a flick: move on and slow down (about a third of the speed gone per 130 ms). */
+  private flingStep(now: number, zs: number) {
+    const v = this.flingV!;
+    const dt = Math.min(50, Math.max(0, now - this.flingT));
+    this.flingT = now;
+    const sb = this.scrollBounds;
+    const move = (io: ValueIO, size: number, d: number) => {
+      if (size <= 0 || !d) return false;
+      const before = io.readRaw();
+      io.writeRaw(before - d / zs / size);
+      return io.readRaw() !== before;
+    };
+    const mx = move(this.scrollX, sb.rw, v[0] * dt);
+    const my = move(this.scrollY, sb.rh, v[1] * dt);
+    const decay = Math.exp(-dt / 325);
+    v[0] = mx ? v[0] * decay : 0;
+    v[1] = my ? v[1] * decay : 0;
+    this.userMoved = true;
+    if (Math.hypot(v[0], v[1]) < 0.01) this.flingV = null;
+    else animating(true);
+  }
+
+  pointAt(mx: number, my: number): [number, number] {
+    const zs = this.zoom.read();
+    const t = this.transform;
+    return [(mx - t.x()) / zs + this.lsx, (my - t.y()) / zs + this.lsy];
+  }
+
+  zoomLevel() {
+    return this.zoom.read();
+  }
+
+  pinchTo(z: number, px: number, py: number, mx: number, my: number) {
+    this.stopFling();
+    this.zoom.writeRaw(z);
+    const zs = this.zoom.read();
+    this.lsz = zs;
+    this.refreshScrollBounds();
+    const t = this.transform;
+    this.setScrollX(px - (mx - t.x()) / zs);
+    this.setScrollY(py - (my - t.y()) / zs);
+    this.userMoved = true;
   }
 }
 
@@ -960,6 +1059,11 @@ export class CanvasHoverTray extends CanvasEmpty {
   }
   scroll(mx: number, my: number, d: number) {
     return super.scroll(mx, my, d) || (!!this.bg && contains(this.lerp, mx, my));
+  }
+  touchDrag(mx: number, my: number, pinch = false) {
+    const r = super.touchDrag(mx, my, pinch);
+    if (r !== undefined) return r;
+    return this.bg && contains(this.lerp, mx, my) ? null : undefined;
   }
 }
 

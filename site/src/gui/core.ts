@@ -312,6 +312,35 @@ export type Tooltip = (string | TipLine)[] | null;
 export const mouseButtons = [false, false, false];
 /** Shift, Alt and Control (or Cmd) held (Keyboard.isKeyDown). */
 export const keys = { shift: false, alt: false, ctrl: false };
+/** How the viewer last pointed: true after a touch, false after the mouse. Updated by the host. */
+export const pointer = { touch: false };
+
+/**
+ * The text field the on-screen keyboard types into, as a GUI rectangle [x, y, w, h], while one
+ * has focus. The host moves the GUI up when the keyboard would cover it.
+ */
+export const softKeyboard = { field: null as (() => [number, number, number, number] | null) | null };
+
+/**
+ * A view a finger can drag and pinch (a scrolling canvas), whatever is under the finger. Touch
+ * input looks one up with touchDrag, which panels pass on to their children.
+ */
+export interface TouchView {
+  /** Start dragging the view with the finger at (mx, my), in the coordinates the lookup got. */
+  beginDrag(mx: number, my: number): void;
+  /** The finger moved to (mx, my), in screen GUI coordinates (scrolling canvases follow it as they draw). */
+  dragTo?(mx: number, my: number): void;
+  /** The finger left; the view keeps moving at (vx, vy) GUI pixels per millisecond and slows. */
+  endDrag(vx: number, vy: number): void;
+  stopFling(): void;
+  /** Whether the view zooms (pinching it zooms instead of scrolling). */
+  readonly zoomable: boolean;
+  /** The canvas point under (mx, my), in screen GUI coordinates. */
+  pointAt(mx: number, my: number): [number, number];
+  zoomLevel(): number;
+  /** Zoom to `z` and move so that canvas point (px, py) is under (mx, my). */
+  pinchTo(z: number, px: number, py: number, mx: number, my: number): void;
+}
 
 export interface Panel {
   transform: GuiRect;
@@ -323,6 +352,57 @@ export interface Panel {
   scroll(mx: number, my: number, dir: number): boolean;
   key(e: KeyboardEvent): boolean;
   tooltip(mx: number, my: number): Tooltip;
+  /**
+   * Touch: the view a finger pressed at (mx, my) drags. null claims the point without a view (the
+   * press goes to the panel as a mouse drag); undefined leaves it to the panels below. `pinch`:
+   * looking for the view two fingers zoom, which panels with drags of their own leave alone.
+   */
+  touchDrag?(mx: number, my: number, pinch?: boolean): TouchView | null | undefined;
+}
+
+/**
+ * A swipe that turns a page (NEI's item list, a recipe screen): once the finger has gone `step` GUI
+ * pixels left or up it is the next page, right or down the previous one.
+ */
+export class SwipePager implements TouchView {
+  readonly zoomable = false;
+  private x = 0;
+  private y = 0;
+  private turned = false;
+  constructor(private turn: (d: number) => void, private step = 24) {}
+  beginDrag(mx: number, my: number) {
+    this.x = mx;
+    this.y = my;
+    this.turned = false;
+  }
+  dragTo(mx: number, my: number) {
+    if (this.turned) return;
+    const dx = mx - this.x, dy = my - this.y;
+    const d = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
+    if (Math.abs(d) < this.step) return;
+    this.turned = true;
+    this.turn(d < 0 ? 1 : -1);
+  }
+  endDrag() {}
+  stopFling() {}
+  pointAt(): [number, number] {
+    return [0, 0];
+  }
+  zoomLevel() {
+    return 1;
+  }
+  pinchTo() {}
+}
+
+/** touchDrag over a list of children, top first. */
+export function touchDragChildren(children: Panel[], mx: number, my: number, pinch = false): TouchView | null | undefined {
+  for (let i = children.length - 1; i >= 0; i--) {
+    const c = children[i];
+    if (!c.enabled || !c.touchDrag) continue;
+    const r = c.touchDrag(mx, my, pinch);
+    if (r !== undefined) return r;
+  }
+  return undefined;
 }
 
 export abstract class BasePanel implements Panel {
@@ -405,5 +485,8 @@ export class CanvasEmpty extends BasePanel {
       if (t && t.length) return t;
     }
     return null;
+  }
+  touchDrag(mx: number, my: number, pinch = false): TouchView | null | undefined {
+    return touchDragChildren(this.children, mx, my, pinch);
   }
 }

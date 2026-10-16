@@ -2,7 +2,7 @@
 // Typing goes through a hidden <input> (or <textarea>) so that browser text entry (IME, mobile
 // keyboards, paste, selection keys) works; the field draws its value, selection and cursor itself.
 
-import { BasePanel, contains, mouseButtons, type Gfx, type GuiRect } from './core.ts';
+import { BasePanel, contains, mouseButtons, softKeyboard, type Gfx, type GuiRect } from './core.ts';
 import { animating, invalidate } from './frame.ts';
 import { tex, col } from './theme.ts';
 import { drawString, stringWidth, FONT_HEIGHT } from './font.ts';
@@ -93,9 +93,10 @@ function setup(el: Field) {
   el.autocomplete = 'off';
   el.spellcheck = false;
   el.setAttribute('aria-label', 'Text');
+  // 16 px text: Safari zooms the page into any field with smaller text when it gets focus.
   Object.assign(el.style, {
     position: 'fixed', left: '0', top: '0', width: '1px', height: '1px', opacity: '0', border: '0', padding: '0',
-    resize: 'none', overflow: 'hidden',
+    resize: 'none', overflow: 'hidden', fontSize: '16px',
   });
   el.addEventListener('input', () => {
     owner?.fromInput();
@@ -175,6 +176,8 @@ export class PanelTextField extends BasePanel {
   private prefX = -1;
   private display: DisplayText = identityDisplay('');
   private shownFor: string | null = null;
+  /** Where the field was last drawn, in screen GUI coordinates (for the on-screen keyboard). */
+  private onScreen: [number, number, number, number] | null = null;
 
   constructor(t: GuiRect, text = '') {
     super(t);
@@ -225,6 +228,7 @@ export class PanelTextField extends BasePanel {
     el.value = this.text;
     el.focus({ preventScroll: true });
     this.syncToElement();
+    softKeyboard.field = () => (owner === this && this.focused ? this.onScreen : null);
   }
 
   blurred() {
@@ -433,6 +437,10 @@ export class PanelTextField extends BasePanel {
     } else if (this.dragging) this.dragging = false;
 
     const state = !this.active ? 0 : this.focused ? 2 : 1;
+    if (this.focused) {
+      const x0 = gfx.dx(r.x()), y0 = gfx.dy(r.y());
+      this.onScreen = [x0 / gfx.base, y0 / gfx.base, (gfx.dx(r.x() + r.w()) - x0) / gfx.base, (gfx.dy(r.y() + r.h()) - y0) / gfx.base];
+    }
     if (this.background) tex(`text_box_${state}`).draw(gfx, r.x(), r.y(), r.w(), r.h());
     const d = this.shown();
     gfx.clip(r.x(), r.y(), r.w(), r.h());

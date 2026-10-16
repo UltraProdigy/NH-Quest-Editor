@@ -3,7 +3,7 @@
 // The inventory itself is empty; the player model is not drawn.
 
 import { Screen } from '../gui/screen.ts';
-import type { Gfx, Tooltip, TipLine } from '../gui/core.ts';
+import type { Gfx, Tooltip, TipLine, TouchView } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
 import { drawString } from '../gui/font.ts';
 import { ItemPanelOverlay } from './itemPanel.ts';
@@ -56,6 +56,9 @@ export class NeiInventoryScreen extends Screen {
   }
   scroll(mx: number, my: number, d: number) {
     return this.overlay.scroll(mx, my, d);
+  }
+  touchDrag(mx: number, my: number, pinch = false): TouchView | undefined {
+    return pinch ? undefined : this.overlay.touchDrag(mx, my);
   }
 
   key(e: KeyboardEvent) {

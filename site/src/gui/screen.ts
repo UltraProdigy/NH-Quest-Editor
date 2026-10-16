@@ -1,13 +1,32 @@
 // Screens (GuiScreenCanvas) and the host that runs them on a <canvas>: GUI scale, input,
 // tooltips and redraw scheduling.
 
-import { CanvasEmpty, Gfx, Rect, Transform, Align, mouseButtons, keys, type Tooltip, type TipLine, type Panel } from './core.ts';
+import {
+  CanvasEmpty, Gfx, Rect, Transform, Align, mouseButtons, keys, pointer, softKeyboard, type Tooltip, type TipLine, type Panel,
+  type TouchView,
+} from './core.ts';
 import { drawString, stringWidth, FONT_HEIGHT } from './font.ts';
 import { splitString } from './text.ts';
 import { redraw } from './frame.ts';
 
 /** Frame interval while only animations change the picture (input still redraws at once). */
 const ANIMATION_FRAME_MS = 1000 / 30;
+
+/** Touch: how far (CSS pixels) a finger moves before a press becomes a drag. */
+const TOUCH_SLOP = 10;
+/** Touch: how long a finger rests before the press shows what the mouse would hover. */
+const LONG_PRESS_MS = 450;
+/** Touch: how far (CSS pixels) a tap may miss something with a tooltip and still reach it. */
+const TAP_REACH = 8;
+
+/**
+ * Touch controls outside the canvas (the touch bar): `rightClick` makes the next tap a right click
+ * (NEI's usages, the quest menu); `changed` is called when it changes.
+ */
+export const touchInput = {
+  rightClick: false,
+  changed: () => {},
+};
 
 export abstract class Screen {
   root!: CanvasEmpty;
@@ -101,6 +120,11 @@ export abstract class Screen {
     if (this.popup?.enabled) return this.popup.tooltip(mx, my);
     return this.root.tooltip(mx, my);
   }
+  /** Touch: the view a finger at (mx, my) drags or pinches (see Panel.touchDrag). */
+  touchDrag(mx: number, my: number, pinch = false): TouchView | null | undefined {
+    if (this.popup?.enabled) return this.popup.touchDrag?.(mx, my, pinch) ?? null;
+    return this.root.touchDrag(mx, my, pinch);
+  }
   /** Called after the screen is shown again (returning from a child screen). */
   resumed() {}
   /** Draw what tooltip() returned. Screens that stand for another mod's GUI can draw it their way. */
@@ -184,9 +208,18 @@ export function drawHoveringText(
 
 // ---------------------------------------------------------------- host
 
+/** A text field of a screen being left lets go of the keyboard (and the phone's keyboard closes). */
+function leaveTextField() {
+  const a = document.activeElement as HTMLElement | null;
+  if (a?.closest?.('input,textarea')) a.blur();
+}
+
 export interface HostOptions {
-  /** Called when the visible screen changes (for the URL and document title). push: a new screen was opened. */
-  onNavigate?: (s: Screen, push: boolean) => void;
+  /**
+   * Called when the visible screen changes (for the URL and document title). push: a new screen
+   * was opened; back: the screen was closed back to its parent.
+   */
+  onNavigate?: (s: Screen, push: boolean, back: boolean) => void;
 }
 
 export class Host {
@@ -205,6 +238,10 @@ export class Host {
   private frameQueued = false;
   private animTimer = 0;
   private lastFrame = 0;
+  /** Whether tooltips show: always with a mouse; with touch only after a long press. */
+  private tips = true;
+  /** CSS pixels the canvas is moved up to keep a text field above the on-screen keyboard. */
+  private kbShift = 0;
 
   private deviceSize() {
     const dpr = window.devicePixelRatio || 1;
@@ -261,21 +298,23 @@ export class Host {
     s.host = this;
     // Re-showing a screen that is already open (e.g. to rebuild it) is not navigation.
     const same = s === this.screen;
+    if (!same) leaveTextField();
     this.screen = s;
     this.relayout();
     this.invalidate();
-    this.opts.onNavigate?.(s, push && !same);
+    this.opts.onNavigate?.(s, push && !same, false);
   }
 
   back() {
     const p = this.screen?.parent;
     if (!p) return;
+    leaveTextField();
     p.host = this;
     this.screen = p;
     this.relayout();
     this.invalidate();
     p.resumed();
-    this.opts.onNavigate?.(p, false);
+    this.opts.onNavigate?.(p, false, true);
   }
 
   /** Show a quest on the quest map, reusing the map screen in the parent chain if there is one. */
@@ -291,7 +330,7 @@ export class Host {
 
   /** Report the current screen's route/title again (after it changed its own state). */
   notify(s: Screen) {
-    if (s === this.screen) this.opts.onNavigate?.(s, false);
+    if (s === this.screen) this.opts.onNavigate?.(s, false, false);
     this.invalidate();
   }
 
@@ -344,7 +383,7 @@ export class Host {
     return this.h;
   }
 
-  private toGui(e: MouseEvent): [number, number] {
+  private toGui(e: { clientX: number; clientY: number }): [number, number] {
     const r = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     return [
@@ -353,10 +392,18 @@ export class Host {
     ];
   }
 
+  /** Back to the mouse after touch: tooltips follow the pointer again. */
+  private usingMouse() {
+    if (!pointer.touch) return;
+    pointer.touch = false;
+    this.tips = true;
+  }
+
   private bind() {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('mousemove', (e) => {
+      this.usingMouse();
       [this.mx, this.my] = this.toGui(e);
       this.invalidate();
     });
@@ -366,6 +413,7 @@ export class Host {
     });
     c.addEventListener('mousedown', (e) => {
       e.preventDefault();
+      this.usingMouse();
       [this.mx, this.my] = this.toGui(e);
       keys.shift = e.shiftKey;
       keys.alt = e.altKey;
@@ -420,82 +468,257 @@ export class Host {
       this.invalidate();
     });
 
-    // Touch: one finger behaves like the left mouse button. Two fingers pinch to zoom: each
-    // 1.25x change in their distance is one mouse wheel step (CanvasScrolling's zoom speed) at the
-    // point between them. A second finger cancels a one-finger press without clicking.
-    let pinchDist = 0;
-    const pinchPoint = (e: TouchEvent): [number, number, number] => {
+    this.bindTouch();
+    this.bindKeyboardFit();
+  }
+
+  // ---------------------------------------------------------------- touch
+
+  /**
+   * Touch. A tap clicks where the finger lifted (so a text field that takes the tap can bring up
+   * the on-screen keyboard). A finger that moves drags the view under it, a scrolling list or the
+   * quest map, even when it started on a button; where there is no view it drags as the mouse
+   * would (scroll bars, the designer's tools). A finger that rests shows what the mouse would
+   * hover (the tooltip, which stays up after the finger lifts until the next touch); moving it
+   * then moves the tooltip along. Two fingers pinch the view between them, zooming about that
+   * point and following it as they move.
+   */
+  private bindTouch() {
+    const c = this.canvas;
+    type Mode = 'idle' | 'press' | 'pan' | 'drag' | 'hover' | 'pinch';
+    let mode: Mode = 'idle';
+    let sx = 0, sy = 0, scx = 0, scy = 0;
+    let timer = 0;
+    let view: TouchView | null = null;
+    let lastView: TouchView | null = null;
+    /** Recent finger positions (GUI pixels, ms) for the speed of a flick. */
+    let trail: [number, number, number][] = [];
+    let pinch: { view: TouchView | null; d0: number; z0: number; px: number; py: number; steps: number } | null = null;
+
+    const mid = (e: TouchEvent): [number, number, number] => {
       const a = e.touches[0], b = e.touches[1];
-      const mid = { clientX: (a.clientX + b.clientX) / 2, clientY: (a.clientY + b.clientY) / 2 } as MouseEvent;
-      const [x, y] = this.toGui(mid);
-      return [x, y, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)];
+      const [x, y] = this.toGui({ clientX: (a.clientX + b.clientX) / 2, clientY: (a.clientY + b.clientY) / 2 });
+      return [x, y, Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY))];
     };
+    const cancelTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = 0;
+    };
+    /** Stop whatever one finger was doing, without a click. */
+    const abandon = () => {
+      cancelTimer();
+      if (mode === 'pan') view?.endDrag(0, 0);
+      if (mode === 'drag') this.screen?.mouseUp(-1e6, -1e6, 0);
+      mouseButtons[0] = false;
+      view = null;
+    };
+
     c.addEventListener(
       'touchstart',
       (e) => {
         e.preventDefault();
-        if (e.touches.length === 2 && !pinchDist) {
-          if (mouseButtons[0]) {
-            mouseButtons[0] = false;
-            this.screen?.mouseUp(-1e6, -1e6, 0);
-          }
-          let d;
-          [this.mx, this.my, d] = pinchPoint(e);
-          pinchDist = Math.max(1, d);
-          this.invalidate();
-          return;
+        pointer.touch = true;
+        if (e.touches.length === 1) {
+          cancelTimer();
+          lastView?.stopFling();
+          lastView = null;
+          const t = e.touches[0];
+          scx = t.clientX;
+          scy = t.clientY;
+          [sx, sy] = this.toGui(t);
+          // Shows a button as pressed, but no tooltip until the finger rests.
+          [this.mx, this.my] = [sx, sy];
+          this.tips = false;
+          mode = 'press';
+          trail = [[sx, sy, e.timeStamp]];
+          timer = window.setTimeout(() => {
+            timer = 0;
+            if (mode !== 'press') return;
+            mode = 'hover';
+            this.tips = true;
+            navigator.vibrate?.(8);
+            this.invalidate();
+          }, LONG_PRESS_MS);
+        } else if (e.touches.length === 2 && mode !== 'pinch') {
+          abandon();
+          const [x, y, d] = mid(e);
+          const v = this.screen?.touchDrag(x, y, true) ?? null;
+          const zoom = v?.zoomable ? v : null;
+          const [px, py] = zoom ? zoom.pointAt(x, y) : [0, 0];
+          pinch = { view: zoom, d0: d, z0: zoom?.zoomLevel() ?? 1, px, py, steps: d };
+          mode = 'pinch';
+          this.tips = false;
+          [this.mx, this.my] = [x, y];
         }
-        if (e.touches.length !== 1 || pinchDist) return;
-        [this.mx, this.my] = this.toGui(e.touches[0] as unknown as MouseEvent);
-        mouseButtons[0] = true;
-        this.screen?.mouseDown(this.mx, this.my, 0);
         this.invalidate();
       },
       { passive: false },
     );
+
     c.addEventListener(
       'touchmove',
       (e) => {
         e.preventDefault();
-        if (pinchDist) {
-          if (e.touches.length < 2) return;
-          let d;
-          [this.mx, this.my, d] = pinchPoint(e);
-          const step = 1.25;
-          while (d >= pinchDist * step) {
-            this.screen?.scroll(this.mx, this.my, -1);
-            pinchDist *= step;
-          }
-          while (d <= pinchDist / step) {
-            this.screen?.scroll(this.mx, this.my, 1);
-            pinchDist /= step;
+        if (mode === 'pinch') {
+          if (e.touches.length < 2 || !pinch) return;
+          const [x, y, d] = mid(e);
+          [this.mx, this.my] = [x, y];
+          if (pinch.view) pinch.view.pinchTo(pinch.z0 * (d / pinch.d0), pinch.px, pinch.py, x, y);
+          else {
+            // Nothing to zoom here: each 1.25x change in the fingers' distance is a wheel step.
+            while (d >= pinch.steps * 1.25) {
+              this.screen?.scroll(x, y, -1);
+              pinch.steps *= 1.25;
+            }
+            while (d <= pinch.steps / 1.25) {
+              this.screen?.scroll(x, y, 1);
+              pinch.steps /= 1.25;
+            }
           }
           this.invalidate();
           return;
         }
-        if (e.touches.length !== 1) return;
-        [this.mx, this.my] = this.toGui(e.touches[0] as unknown as MouseEvent);
+        if (e.touches.length !== 1 || mode === 'idle') return;
+        const t = e.touches[0];
+        if (mode === 'press') {
+          if (Math.hypot(t.clientX - scx, t.clientY - scy) < TOUCH_SLOP) return;
+          cancelTimer();
+          const v = this.screen?.touchDrag(sx, sy) ?? null;
+          mouseButtons[0] = true;
+          if (v) {
+            mode = 'pan';
+            view = v;
+            v.beginDrag(sx, sy);
+          } else {
+            mode = 'drag';
+            this.screen?.mouseDown(sx, sy, 0);
+          }
+        }
+        [this.mx, this.my] = this.toGui(t);
+        if (mode === 'pan') view?.dragTo?.(this.mx, this.my);
+        trail.push([this.mx, this.my, e.timeStamp]);
+        if (trail.length > 8) trail.shift();
         this.invalidate();
       },
       { passive: false },
     );
+
     const touchEnd = (e: TouchEvent) => {
-      if (pinchDist) {
-        // Stay in the pinch until every finger is up, so the last one does not start a drag.
-        if (e.touches.length === 0) {
-          pinchDist = 0;
-          this.mx = this.my = -1;
-          this.invalidate();
+      if (e.touches.length > 0) {
+        // A pinch lasts until every finger is up, so the last one does not start a drag.
+        if (mode !== 'pinch') {
+          abandon();
+          mode = 'idle';
         }
         return;
       }
+      cancelTimer();
+      const was = mode;
+      mode = 'idle';
+      if (was === 'press' && e.type === 'touchend') this.tap(sx, sy);
+      else if (was === 'pan' && view) {
+        // The flick's speed over the last ~100 ms of the finger's path.
+        const now = trail[trail.length - 1];
+        let first = now;
+        for (const p of trail) if (now[2] - p[2] <= 100) {
+          first = p;
+          break;
+        }
+        const dt = now[2] - first[2];
+        const still = e.timeStamp - now[2] > 60;
+        mouseButtons[0] = false;
+        view.endDrag(dt > 0 && !still ? (now[0] - first[0]) / dt : 0, dt > 0 && !still ? (now[1] - first[1]) / dt : 0);
+        lastView = view;
+      } else if (was === 'drag') {
+        mouseButtons[0] = false;
+        this.screen?.mouseUp(this.mx, this.my, 0);
+      } else if (was === 'hover') {
+        // The tooltip stays where the finger was until the next touch.
+        this.invalidate();
+        return;
+      }
       mouseButtons[0] = false;
-      this.screen?.mouseUp(this.mx, this.my, 0);
+      view = null;
+      pinch = null;
       this.mx = this.my = -1;
       this.invalidate();
     };
     c.addEventListener('touchend', touchEnd);
     c.addEventListener('touchcancel', touchEnd);
+    // Safari's own pinch and double-tap zoom of the page.
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+  }
+
+  /** A tap: a click (a right click when the touch bar asked for one) where the finger was. */
+  private tap(x: number, y: number) {
+    const s = this.screen;
+    if (!s) return;
+    const b = touchInput.rightClick ? 1 : 0;
+    if (touchInput.rightClick) {
+      touchInput.rightClick = false;
+      touchInput.changed();
+    }
+    [x, y] = this.reach(s, x, y);
+    this.mx = x;
+    this.my = y;
+    mouseButtons[b] = true;
+    s.mouseDown(x, y, b);
+    mouseButtons[b] = false;
+    // A click that opened another screen is done; the new screen did not see it start.
+    if (this.screen === s) s.mouseUp(x, y, b);
+  }
+
+  /**
+   * Fingers are wider than the things they tap (16-pixel items and icons): a tap that lands on
+   * nothing with a tooltip goes to the nearest thing that has one within a few pixels.
+   */
+  private reach(s: Screen, x: number, y: number): [number, number] {
+    const hit = (px: number, py: number) => !!s.tooltip(px, py)?.length;
+    if (hit(x, y)) return [x, y];
+    const r = Math.max(2, Math.round((TAP_REACH * (window.devicePixelRatio || 1)) / this.scale));
+    for (let d = 2; d <= r; d += 2) {
+      for (let a = 0; a < 8; a++) {
+        const px = x + Math.round(Math.cos((a * Math.PI) / 4) * d), py = y + Math.round(Math.sin((a * Math.PI) / 4) * d);
+        if (hit(px, py)) return [px, py];
+      }
+    }
+    return [x, y];
+  }
+
+  // ---------------------------------------------------------------- on-screen keyboard
+
+  /** Keep the focused text field above the on-screen keyboard (see softKeyboard). */
+  private bindKeyboardFit() {
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', () => this.invalidate());
+    vv?.addEventListener('scroll', () => this.invalidate());
+    document.addEventListener('focusout', () => {
+      // Safari may have scrolled the page to the hidden input; put it back once typing is done.
+      setTimeout(() => {
+        if (!document.activeElement?.closest?.('input,textarea')) window.scrollTo(0, 0);
+        this.invalidate();
+      }, 50);
+    });
+  }
+
+  private fitKeyboard() {
+    const vv = window.visualViewport;
+    const f = softKeyboard.field?.() ?? null;
+    let shift = 0;
+    if (vv && f && pointer.touch && document.activeElement?.closest?.('input,textarea')) {
+      const k = this.scale / (window.devicePixelRatio || 1);
+      const top = this.canvas.getBoundingClientRect().top + this.kbShift;
+      const y0 = top + f[1] * k, y1 = top + (f[1] + f[3]) * k;
+      const visTop = vv.offsetTop, visBottom = vv.offsetTop + vv.height;
+      const margin = 8;
+      if (y1 + margin > visBottom) shift = y1 + margin - visBottom;
+      if (y0 - shift < visTop) shift = y0 - visTop;
+      shift = Math.max(0, Math.round(shift));
+    }
+    if (shift !== this.kbShift) {
+      this.kbShift = shift;
+      this.canvas.style.transform = shift ? `translateY(${-shift}px)` : '';
+    }
   }
 
   private frame() {
@@ -516,9 +739,10 @@ export class Host {
     const s = this.screen;
     if (!s) return;
     s.draw(gfx, this.mx, this.my);
-    const tt = this.mx >= 0 ? s.tooltip(this.mx, this.my) : null;
+    const tt = this.mx >= 0 && this.tips ? s.tooltip(this.mx, this.my) : null;
     if (tt && tt.length) s.drawTooltip(gfx, tt, this.mx, this.my);
     this.canvas.style.cursor = 'default';
+    this.fitKeyboard();
   }
 }
 

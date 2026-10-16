@@ -10,7 +10,7 @@
 // - tabs above the window, catalysts to its left.
 
 import { Screen } from '../gui/screen.ts';
-import { type Gfx, type Tooltip, type TipLine, keys as heldKeys } from '../gui/core.ts';
+import { type Gfx, type Tooltip, type TipLine, type TouchView, keys as heldKeys, SwipePager } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import {
@@ -506,6 +506,16 @@ export class RecipeScreen extends Screen {
       inside({ x: this.gl - TRANSPARENCY, y: this.gt - TAB, w: X_SIZE + 2 * TRANSPARENCY, h: this.ySize + TAB + TRANSPARENCY }, mx, my) ||
       (!!cat && inside(cat.rect, mx, my))
     );
+  }
+
+  private pager = new SwipePager((d) => this.changePage(d));
+
+  /** Touch: a swipe over the recipes turns their pages, one over NEI's item list that list's. */
+  touchDrag(mx: number, my: number, pinch = false): TouchView | undefined {
+    if (pinch) return undefined;
+    const v = this.overlay.touchDrag(mx, my);
+    if (v) return v;
+    return inside(this.container(), mx, my) ? this.pager : undefined;
   }
 
   scroll(mx: number, my: number, d: number) {
