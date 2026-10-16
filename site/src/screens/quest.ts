@@ -170,23 +170,35 @@ export class QuestScreen extends Screen {
 
     const cvInner = bg.add(new CanvasEmpty(new Transform(Align.FULL_BOX, [16, 32, 16, 24])));
 
-    if (q.rewards.length > 0) {
-      this.descPanel(cvInner, true);
-      cvInner.add(new PanelButton(new Transform([0, 1, 0.5, 1], [0, -16, 8, 0]), { text: tr('betterquesting.btn.claim'), active: false }));
-      const rectReward = new Transform([0, 0.5, 0.5, 1], [0, 0, 8, 16]);
+    // A screen taller than wide (a phone held upright) has no room for two columns: the
+    // description and rewards go above, the tasks below, each the full width.
+    const stacked = this.width < this.height;
+    const hasReward = q.rewards.length > 0;
+    this.descPanel(cvInner, hasReward, stacked);
+    if (hasReward) {
+      cvInner.add(
+        new PanelButton(stacked ? new Transform([0, 1, 0.5, 1], [0, -16, 4, 0]) : new Transform([0, 1, 0.5, 1], [0, -16, 8, 0]), {
+          text: tr('betterquesting.btn.claim'),
+          active: false,
+        }),
+      );
+      const rectReward = stacked ? new Transform([0, 0.3, 1, 0.5], [0, 4, 0, 8]) : new Transform([0, 0.5, 0.5, 1], [0, 0, 8, 16]);
       rectReward.parent = cvInner.transform;
       this.rewardPanel(cvInner, rectReward, q);
-    } else {
-      this.descPanel(cvInner, false);
     }
-    cvInner.add(new PanelButton(new Transform([0.5, 1, 1, 1], [8, -16, 0, 0]), { text: tr('betterquesting.btn.detect_submit'), active: false }));
-    const rectTask = new Transform(Align.HALF_RIGHT, [8, 16, 0, 16]);
+    cvInner.add(
+      new PanelButton(stacked && hasReward ? new Transform([0.5, 1, 1, 1], [4, -16, 0, 0]) : stacked ? new Transform(Align.BOTTOM_EDGE, [0, -16, 0, 0]) : new Transform([0.5, 1, 1, 1], [8, -16, 0, 0]), {
+        text: tr('betterquesting.btn.detect_submit'),
+        active: false,
+      }),
+    );
+    const rectTask = stacked ? new Transform(Align.HALF_BOTTOM, [0, 8, 0, 20]) : new Transform(Align.HALF_RIGHT, [8, 16, 0, 16]);
     rectTask.parent = cvInner.transform;
     this.taskPanel(cvInner, rectTask, q);
 
-    const ls0 = Transform.at(Align.TOP_CENTER, 0, 0, 0, 0);
+    const ls0 = Transform.at(stacked ? Align.MID_LEFT : Align.TOP_CENTER, 0, 0, 0, 0);
     ls0.parent = cvInner.transform;
-    const le0 = Transform.at(Align.BOTTOM_CENTER, 0, 0, 0, 0);
+    const le0 = Transform.at(stacked ? Align.MID_RIGHT : Align.BOTTOM_CENTER, 0, 0, 0, 0);
     le0.parent = cvInner.transform;
     cvInner.add(new PanelLine(ls0, le0, themeLine('gui_divider'), 1, col('gui_divider'), 1));
   }
@@ -244,10 +256,14 @@ export class QuestScreen extends Screen {
     this.host.show(new QuestScreen(this, q.id));
   }
 
-  private descPanel(cvInner: CanvasEmpty, hasReward: boolean) {
+  private descPanel(cvInner: CanvasEmpty, hasReward: boolean, stacked: boolean) {
+    /** Bottom of the description (a fraction of the height) when stacked above the tasks. */
+    const bottom = hasReward ? 0.3 : 0.5;
     const cs = (this.csDesc = cvInner.add(
       new CanvasScrolling(
-        hasReward ? new Transform([0, 0, 0.5, 0.5], [0, 0, 16, 16]) : new Transform(Align.HALF_LEFT, [0, 0, 16, 0]),
+        stacked
+          ? new Transform([0, 0, 1, bottom], [0, 0, 12, 4])
+          : hasReward ? new Transform([0, 0, 0.5, 0.5], [0, 0, 16, 16]) : new Transform(Align.HALF_LEFT, [0, 0, 16, 0]),
       ),
     ));
     const diff = showDescDiff && reviewHooks.active() ? reviewHooks.descDiff(this.q!.id) : null;
@@ -255,7 +271,14 @@ export class QuestScreen extends Screen {
     const descMark = reviewHooks.active() ? reviewHooks.areaMark(this.q!.id, 'desc') : null;
     if (descMark !== null) {
       // A bar in the margin left of the description.
-      cvInner.add(new PanelFill(hasReward ? new Transform([0, 0, 0, 0.5], [-7, 0, 4, 16]) : new Transform(Align.LEFT_EDGE, [-7, 0, 4, 0]), descMark));
+      cvInner.add(
+        new PanelFill(
+          stacked
+            ? new Transform([0, 0, 0, bottom], [-7, 0, 4, 4])
+            : hasReward ? new Transform([0, 0, 0, 0.5], [-7, 0, 4, 16]) : new Transform(Align.LEFT_EDGE, [-7, 0, 4, 0]),
+          descMark,
+        ),
+      );
     }
     let last = 0;
     let y = 0;
@@ -285,10 +308,12 @@ export class QuestScreen extends Screen {
     cs.addAll(panels);
     const bar = cvInner.add(
       new PanelVScrollBar(
-        new Transform(
-          hasReward ? quickAnchor(Align.TOP_CENTER, Align.MID_CENTER) : quickAnchor(Align.TOP_CENTER, Align.BOTTOM_CENTER),
-          [-16, 0, 8, hasReward ? 16 : 0],
-        ),
+        stacked
+          ? new Transform([1, 0, 1, bottom], [-8, 0, 0, 4])
+          : new Transform(
+            hasReward ? quickAnchor(Align.TOP_CENTER, Align.MID_CENTER) : quickAnchor(Align.TOP_CENTER, Align.BOTTOM_CENTER),
+            [-16, 0, 8, hasReward ? 16 : 0],
+          ),
       ),
     );
     cs.scrollY = bar;

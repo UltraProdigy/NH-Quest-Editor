@@ -35,8 +35,6 @@ const mono = (s: string) => (forceMonochrome ? stripFormatting(s) : s);
 // Settings kept for the session, like BQ's static fields and config.
 const ui = {
   trayLock: loadPrefs().trayLock,
-  hideLockedLines: false,
-  viewMode: false,
   chapterScroll: 0,
 };
 
@@ -101,7 +99,7 @@ export class QuestLinesScreen extends Screen {
         ? { zoom: this.cvQuest.zoom.read(), center: this.cvQuest.center() }
         : null;
     const firstQuestView = this.firstView && !this.selectedLine && this.selectFirstLine();
-    const preOpen = ui.trayLock || firstQuestView;
+    const preOpen = (ui.trayLock && !this.upright()) || firstQuestView;
 
     const bg = this.root.add(new CanvasTextured(new Transform(Align.FULL_BOX, [0, 0, 0, 0]), tex('panel_main')));
 
@@ -262,11 +260,6 @@ export class QuestLinesScreen extends Screen {
         this.cvDescTray.setTrayState(!this.cvDescTray.isOpen, 200);
       },
     });
-    const claim = side({
-      tooltip: [tr('betterquesting.btn.claim_all'), tr('betterquesting.btn.claim_all_detailed')],
-      active: false,
-    });
-    claim.setIcon(icon('chest_all'), GRAY);
     side({
       icon: icon('box_fit'),
       tooltip: [tr('betterquesting.btn.zoom_fit')],
@@ -299,16 +292,6 @@ export class QuestLinesScreen extends Screen {
       update();
       return b;
     };
-    toggle(
-      'quest_lines_shown', 'betterquesting.btn.hide_locked_quest_lines',
-      () => ui.hideLockedLines, (v) => (ui.hideLockedLines = v),
-      (v) => `betterquesting.tooltip.cycle.${v}`, true, () => this.buildChapterList(),
-    );
-    toggle(
-      'view_mode_on', 'betterquesting.btn.view_mode',
-      () => ui.viewMode, (v) => (ui.viewMode = v),
-      (v) => `betterquesting.tooltip.cycle.${v}`, false,
-    );
     toggle(
       'visibility_normal', 'betterquesting.btn.always_draw_implicit',
       () => mapSettings.alwaysDrawImplicit, (v) => (mapSettings.alwaysDrawImplicit = v),
@@ -369,6 +352,14 @@ export class QuestLinesScreen extends Screen {
       this.focusQuest(id);
     }
     this.firstView = false;
+  }
+
+  /**
+   * A screen taller than wide (a phone held upright): too narrow for the quest line list beside
+   * the map, so the list closes once a line is picked even when the tray is locked open.
+   */
+  private upright() {
+    return this.width < this.height;
   }
 
   private selectFirstLine() {
@@ -465,7 +456,7 @@ export class QuestLinesScreen extends Screen {
     this.icoChapter.texture = l.icon ? itemTexture(l.icon) : null;
     this.txTitle.setText(mono(l.name));
     this.refreshCompletion();
-    if (!ui.trayLock) {
+    if (!ui.trayLock || this.upright()) {
       this.cvFrame.setTrayState(true, 200);
       this.cvChapterTray.setTrayState(false, 200);
       this.cvQuest.fitToWindow();
