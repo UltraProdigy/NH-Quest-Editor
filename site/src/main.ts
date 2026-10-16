@@ -27,6 +27,7 @@ import { EditsScreen } from './screens/edits.ts';
 import { ReviewScreen, ReviewPickerScreen } from './screens/review.ts';
 import { installReview } from './review/install.ts';
 import { startReview } from './review/session.ts';
+import { installTouchBar } from './touchbar.ts';
 
 const SITE_TITLE = 'GTNH Questbook';
 const canvas = document.getElementById('gui') as HTMLCanvasElement;
@@ -63,17 +64,43 @@ async function start() {
   mapSettings.alwaysDrawImplicit = prefs.implicit;
   setForceMonochrome(prefs.mono);
 
+  // Browser history follows the screens: opening a screen adds an entry, and closing it goes back
+  // one, so the phone's back gesture and the site's own back buttons agree. Each entry the site
+  // added counts how deep it is (history.state.depth); the first one is 0.
+  const depth = () => (history.state as { depth?: number } | null)?.depth ?? 0;
+  /** Set while the site goes back in the history itself, until the browser reports it. */
+  let ownBack = false;
+  /** Screens closed in this task (one Escape may close several): one step back for them all. */
+  let backs = 0;
+  /** Set while the screens follow the browser's back button (the history moved already). */
+  let followingHistory = false;
+  let touchBar: { update(): void } | null = null;
   const host = new Host(canvas, {
-    onNavigate: (s, push) => {
+    onNavigate: (s, push, back) => {
       const hash = s.route();
       const title = s.title();
       document.title = title ? `${title} · ${SITE_TITLE}` : SITE_TITLE;
+      touchBar?.update();
+      if (followingHistory) return;
+      if (back && depth() > 0) {
+        // The parent's entry is the one before this screen's: step back to it.
+        if (backs++ === 0) {
+          queueMicrotask(() => {
+            const n = Math.min(backs, depth());
+            backs = 0;
+            ownBack = true;
+            history.go(-n);
+          });
+        }
+        return;
+      }
       if (location.hash !== hash) {
-        if (push) history.pushState(null, '', hash);
-        else history.replaceState(null, '', hash);
+        if (push) history.pushState({ depth: depth() + 1 }, '', hash);
+        else history.replaceState({ depth: depth() }, '', hash);
       }
     },
   });
+  touchBar = installTouchBar(host);
   host.setScale(prefs.scale);
 
   // Edit mode: screens rebuild after every change; Ctrl + Z / Ctrl + Y undo and redo.
@@ -222,7 +249,31 @@ async function start() {
     }
     host.show(new QuestLinesScreen(null), false);
   };
-  window.addEventListener('popstate', () => void openRoute());
+  window.addEventListener('popstate', () => {
+    if (ownBack) {
+      // Our own step back: the screen is shown already; the entry may name it differently.
+      ownBack = false;
+      const hash = host.screen?.route();
+      if (hash && location.hash !== hash) history.replaceState({ depth: depth() }, '', hash);
+      return;
+    }
+    // The browser's back button: when the entry is a screen we came from, close back to it so it
+    // is as it was left (map position, scroll, tray); anything else is opened from its address.
+    let n = 0;
+    for (let s = host.screen?.parent ?? null; s; s = s.parent) {
+      n++;
+      if (s.route() === location.hash) {
+        followingHistory = true;
+        try {
+          for (let i = 0; i < n; i++) host.back();
+        } finally {
+          followingHistory = false;
+        }
+        return;
+      }
+    }
+    void openRoute();
+  });
   await openRoute();
   status.remove();
 }

@@ -3,6 +3,9 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  /* No pull-to-refresh or scroll chaining while dragging the questbook around. */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
   background: #1b1b1f;
   color: #ddd;
   font: 14px/1.4 system-ui, sans-serif;
@@ -15,6 +18,10 @@ body {
   height: 100dvh;
   touch-action: none;
   image-rendering: pixelated;
+  /* A long press shows a tooltip, not the browser's selection or image menu. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #status {
@@ -23,4 +30,80 @@ body {
   display: grid;
   place-items: center;
   pointer-events: none;
+}
+
+/* Touch bar (touchbar.ts): Back, the E key and a right click, for phones and tablets. It takes a
+   strip beside the GUI: at the right in landscape, at the bottom in portrait. */
+body.touch {
+  display: flex;
+  flex-direction: row;
+}
+
+body.touch #gui {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+#touchbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px;
+  background: #121215;
+  border-left: 1px solid #2c2c33;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+@media (orientation: portrait) {
+  body.touch {
+    flex-direction: column;
+  }
+  body.touch #gui {
+    width: 100vw;
+    height: auto;
+    min-height: 0;
+  }
+  #touchbar {
+    flex-direction: row;
+    border-left: 0;
+    border-top: 1px solid #2c2c33;
+  }
+}
+
+#touchbar[hidden] {
+  display: none;
+}
+
+#touchbar button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: #e8e8e8;
+  background: #46464c;
+  border: 1px solid #000;
+  border-radius: 6px;
+  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.22), inset -2px -2px 0 rgba(0, 0, 0, 0.35);
+  touch-action: none;
+}
+
+#touchbar button:active {
+  background: #6e6e78;
+}
+
+#touchbar button:disabled {
+  color: #6a6a70;
+  background: #2a2a2f;
+}
+
+#touchbar button.on {
+  color: #1b1b1f;
+  background: #ffcc33;
 }
