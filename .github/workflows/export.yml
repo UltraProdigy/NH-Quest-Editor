@@ -178,10 +178,11 @@ jobs:
       - name: List the item stacks the questbook shows
         if: inputs.render_icons
         run: |
-          # The exporter renders each of these exactly (NBT included) for the site's quest icons.
+          # The exporter renders each of these exactly (NBT included) for the site's quest icons,
+          # with the items of the vending machine trades the quests unlock.
           git clone -q --depth 1 --filter=blob:none --sparse \
             https://github.com/GTNewHorizons/GT-New-Horizons-Modpack "$WORK/modpack"
-          git -C "$WORK/modpack" sparse-checkout set config/betterquesting
+          git -C "$WORK/modpack" sparse-checkout set config/betterquesting config/vendingmachine
           node site/scripts/build-quests.ts "$WORK/modpack/config/betterquesting/DefaultQuests" \
             "$WORK/questbook.json" --stacks "$WORK/quest-stacks.jsonl"
 

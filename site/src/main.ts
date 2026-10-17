@@ -10,7 +10,7 @@ import { PopItemList } from './gui/popup.ts';
 import { openLookup, RecipeScreen, type RecipeMode } from './nei/recipeScreen.ts';
 import { NeiInventoryScreen } from './nei/inventoryScreen.ts';
 import { splitString, plainText, setForceMonochrome } from './gui/text.ts';
-import { loadQuestbook, quest as getQuest, fullId, linesContaining, view, questNbtFluid, type QuestState } from './store.ts';
+import { loadQuestbook, loadVending, quest as getQuest, fullId, linesContaining, view, questNbtFluid, type QuestState } from './store.ts';
 import { nbtFluidOf, questTab, loadNei, itemIndexOf, itemKeyAt } from './nei/data.ts';
 import { toggleItem } from './nei/bookmarks.ts';
 import { installQuestTab } from './nei/quests.ts';
@@ -40,6 +40,7 @@ async function start() {
     fetchJson<ThemeJson[]>(resourceUrl('betterquesting:bq_themes.json')),
     loadQuestbook(),
     loadItems(),
+    loadVending(),
   ]);
   registerThemes(themes);
   // Themes shipped with the modpack (config/betterquesting/resources), copied in by the data build.

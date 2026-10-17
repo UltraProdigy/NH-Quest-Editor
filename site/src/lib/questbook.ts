@@ -26,15 +26,10 @@ export interface QuestStack {
 }
 
 /**
- * Build the questbook model. `stacks`, when given, collects every distinct item stack shown
- * (icons, task and reward items) keyed like the site looks them up.
+ * Readers from typed NBT JSON to the site's model. `stacks`, when given, collects every distinct
+ * item stack read, keyed like the site looks them up.
  */
-export function buildQuestbook(
-  db: QuestDb,
-  source: QuestbookData['source'],
-  stacks?: Map<string, QuestStack>,
-  generatedAt = new Date().toISOString(),
-): QuestbookData {
+export function stackReader(stacks?: Map<string, QuestStack>) {
   /**
    * Convert typed NBT JSON to plain JSON: strip suffixes, lists to arrays, longs to strings. Nested
    * values go through convert(), so item and fluid stacks anywhere inside become ItemRef/FluidRef.
@@ -88,6 +83,21 @@ export function buildQuestbook(
     }
     return plain(v, type);
   }
+
+  return { plain, item, convert };
+}
+
+/**
+ * Build the questbook model. `stacks`, when given, collects every distinct item stack shown
+ * (icons, task and reward items) keyed like the site looks them up.
+ */
+export function buildQuestbook(
+  db: QuestDb,
+  source: QuestbookData['source'],
+  stacks?: Map<string, QuestStack>,
+  generatedAt = new Date().toISOString(),
+): QuestbookData {
+  const { plain, item, convert } = stackReader(stacks);
 
   function taskData(v: BqValue, idKey: string): TaskData {
     const o = convert(v, NBT.COMPOUND) as Record<string, unknown>;

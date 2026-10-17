@@ -13,9 +13,9 @@ import { texture as loadTexture, whenLoaded, resourceUrl } from '../gui/assets.t
 import { plainText, forceMonochrome } from '../gui/text.ts';
 import { stringWidth, stripFormatting } from '../gui/font.ts';
 import { staticColor } from '../gui/color.ts';
-import { quest as getQuest, prop, dependantsOf, isInAnyLine, shortId } from '../store.ts';
+import { quest as getQuest, prop, dependantsOf, isInAnyLine, shortId, questTrades } from '../store.ts';
 import type { Quest } from '../lib/model.ts';
-import { taskPanel, rewardPanel, typeName } from './taskPanels.ts';
+import { taskPanel, rewardPanel, tradePanel, typeName } from './taskPanels.ts';
 import { PropertiesScreen } from './properties.ts';
 import { canEdit } from './editor/common.ts';
 import { QuestEditorScreen } from './editor/questEditor.ts';
@@ -173,21 +173,26 @@ export class QuestScreen extends Screen {
     // A screen taller than wide (a phone held upright) has no room for two columns: the
     // description and rewards go above, the tasks below, each the full width.
     const stacked = this.width < this.height;
-    const hasReward = q.rewards.length > 0;
+    // Vending machine exchanges the quest unlocks are listed under its rewards, so a quest with
+    // exchanges but no rewards still gets the reward column (without the Claim button).
+    const hasClaim = q.rewards.length > 0;
+    const hasReward = hasClaim || questTrades(q.id).length > 0;
     this.descPanel(cvInner, hasReward, stacked);
-    if (hasReward) {
+    if (hasClaim) {
       cvInner.add(
         new PanelButton(stacked ? new Transform([0, 1, 0.5, 1], [0, -16, 4, 0]) : new Transform([0, 1, 0.5, 1], [0, -16, 8, 0]), {
           text: tr('betterquesting.btn.claim'),
           active: false,
         }),
       );
+    }
+    if (hasReward) {
       const rectReward = stacked ? new Transform([0, 0.3, 1, 0.5], [0, 4, 0, 8]) : new Transform([0, 0.5, 0.5, 1], [0, 0, 8, 16]);
       rectReward.parent = cvInner.transform;
       this.rewardPanel(cvInner, rectReward, q);
     }
     cvInner.add(
-      new PanelButton(stacked && hasReward ? new Transform([0.5, 1, 1, 1], [4, -16, 0, 0]) : stacked ? new Transform(Align.BOTTOM_EDGE, [0, -16, 0, 0]) : new Transform([0.5, 1, 1, 1], [8, -16, 0, 0]), {
+      new PanelButton(stacked && hasClaim ? new Transform([0.5, 1, 1, 1], [4, -16, 0, 0]) : stacked ? new Transform(Align.BOTTOM_EDGE, [0, -16, 0, 0]) : new Transform([0.5, 1, 1, 1], [8, -16, 0, 0]), {
         text: tr('betterquesting.btn.detect_submit'),
         active: false,
       }),
@@ -346,6 +351,21 @@ export class QuestScreen extends Screen {
       }
       if (m !== null) panels.push(new PanelFill(new Rect(0, top, rect.w() - 8, y - top, 2), m, 0x30));
     });
+    const groups = questTrades(q.id);
+    if (groups.length) {
+      const title = new PanelTextBox(Transform.at([0, 0, 0, 0], 0, y, rect.w(), 12), tr('bq_standard.trade_unlock'));
+      title.setColor(col('text_header')).setAlignment(1);
+      panels.push(title);
+      y += 12;
+      for (const trade of groups.flatMap((g) => g.trades)) {
+        const gui = tradePanel(trade, Transform.at(Align.FULL_BOX, 0, 0, rect.w(), rect.h(), 111));
+        gui.init();
+        const wrap = new CanvasEmpty(Transform.at(Align.TOP_LEFT, 0, y, rect.w(), gui.transform.h() - gui.transform.y(), 1));
+        wrap.add(gui);
+        panels.push(wrap);
+        y += wrap.transform.h();
+      }
+    }
     cs.addAll(panels);
     cs.setScrollY(this.pos().reward);
     cs.updatePanelScroll();

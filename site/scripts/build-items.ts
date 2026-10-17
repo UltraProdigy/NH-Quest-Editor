@@ -9,12 +9,13 @@
 // add the stacks with NBT (keys "<id>@<dmg>#<hash>").
 //
 // Phase 1 only ships what the questbook references (quest/line icons, task and reward items,
-// their ore dictionary members). The full item index comes with the recipe views.
+// their ore dictionary members, and the items of the vending machine trades in vending.json
+// beside <questbook.json>). The full item index comes with the recipe views.
 
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { parseJsonFile } from './jsonStream.ts';
-import type { QuestbookData, ItemIndex, ItemInfo, ItemRef } from '../src/lib/model.ts';
+import type { QuestbookData, ItemIndex, ItemInfo, ItemRef, VendingData } from '../src/lib/model.ts';
 
 const [, , exportArg, iconsArg, questsArg, outArg] = process.argv;
 if (!exportArg || !iconsArg || !questsArg) {
@@ -108,6 +109,8 @@ const exp = (await parseJsonFile(resolve(exportArg), {
 })) as ExportRoot;
 console.timeEnd('read export');
 const book = JSON.parse(readFileSync(resolve(questsArg), 'utf8')) as QuestbookData;
+const vendingFile = join(dirname(resolve(questsArg)), 'vending.json');
+const vending = existsSync(vendingFile) ? (JSON.parse(readFileSync(vendingFile, 'utf8')) as VendingData) : null;
 
 // ---------------------------------------------------------------- icons of the exact quest stacks
 
@@ -203,6 +206,7 @@ for (const q of Object.values(book.quests)) {
   walkRefs(q.rewards);
 }
 for (const l of book.lines) if (l.icon) need(l.icon);
+if (vending) walkRefs(vending.groups.map((g) => g.trades));
 // Fixed items drawn by the GUI itself.
 for (const id of ['minecraft:crafting_table', 'minecraft:furnace', 'minecraft:anvil', 'minecraft:experience_bottle']) {
   needWithWildcard(`${id}@0`);

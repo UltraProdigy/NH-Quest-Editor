@@ -1,7 +1,8 @@
 // The loaded questbook and the lookups the screens need.
 
 import { fetchJson, siteUrl } from './gui/assets.ts';
-import type { Quest, QuestLine, QuestbookData } from './lib/model.ts';
+import type { Quest, QuestLine, QuestbookData, VendingData, VendingGroup } from './lib/model.ts';
+import { groupsByQuest } from './lib/vending.ts';
 
 export let book: QuestbookData;
 const dependants = new Map<string, string[]>();
@@ -32,6 +33,24 @@ export function setQuestbook(b: QuestbookData) {
     }
   }
 }
+
+// ---------------------------------------------------------------- vending machine
+
+let vending: VendingData = { format: 1, source: { repo: '', commit: '', date: '' }, groups: [] };
+let tradesOf = new Map<string, VendingGroup[]>();
+
+/** The Vending Machine's trades (data/vending.json); without them quests list no exchanges. */
+export async function loadVending() {
+  try {
+    vending = await fetchJson<VendingData>(siteUrl('data/vending.json'));
+  } catch {
+    return;
+  }
+  tradesOf = groupsByQuest(vending);
+}
+
+/** The trade groups a quest unlocks (BqAdapter.getTrades). */
+export const questTrades = (id: string): VendingGroup[] => tradesOf.get(id) ?? [];
 
 export const quest = (id: string): Quest | undefined => book.quests[id];
 export const line = (id: string): QuestLine | undefined => book.lines.find((l) => l.id === id);

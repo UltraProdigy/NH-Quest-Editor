@@ -1,11 +1,16 @@
 // Builds public/data/questbook.json from a BetterQuesting DefaultQuests folder.
 //
-// Usage: node scripts/build-quests.ts <DefaultQuests dir> [out file] [--stacks <file>]
+// Usage: node scripts/build-quests.ts <DefaultQuests dir> [out file] [--stacks <file>] [--trades <file>]
 // Optional env: QUESTS_REPO, QUESTS_COMMIT, QUESTS_DATE (recorded as the data source).
 //
-// --stacks writes every distinct item stack the questbook shows (icons, task and reward items),
-// with its NBT exactly as BetterQuesting stores it, for the exporter to render one by one.
-// Stacks with NBT get a key "<id>@<dmg>#<hash>" (ItemRef.k) so the site can find their icon.
+// --stacks writes every distinct item stack the questbook shows (icons, task and reward items,
+// vending machine trades), with its NBT exactly as BetterQuesting stores it, for the exporter to
+// render one by one. Stacks with NBT get a key "<id>@<dmg>#<hash>" (ItemRef.k) so the site can
+// find their icon.
+//
+// The Vending Machine's trades are read from --trades, or else from the modpack's
+// config/vendingmachine/tradeDatabase.json beside config/betterquesting, and written to
+// vending.json next to the questbook.
 //
 // If the DefaultQuests folder has a sibling "resources" folder (config/betterquesting/resources,
 // where modpacks put custom themes and pictures), its contents are copied to public/assets and
@@ -15,13 +20,16 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync, statSync, cpSync, 
 import { join, dirname, resolve, relative, sep } from 'node:path';
 import { loadDb } from '../src/lib/bqsave.ts';
 import { buildQuestbook, type QuestStack } from '../src/lib/questbook.ts';
+import { buildVending } from '../src/lib/vending.ts';
 
 const argv = process.argv.slice(2);
 const stacksAt = argv.indexOf('--stacks');
 const stacksArg = stacksAt >= 0 ? argv.splice(stacksAt, 2)[1] : undefined;
+const tradesAt = argv.indexOf('--trades');
+const tradesArg = tradesAt >= 0 ? argv.splice(tradesAt, 2)[1] : undefined;
 const [srcArg, outArg] = argv;
-if (!srcArg || (stacksAt >= 0 && !stacksArg)) {
-  console.error('Usage: node scripts/build-quests.ts <DefaultQuests dir> [out file] [--stacks <file>]');
+if (!srcArg || (stacksAt >= 0 && !stacksArg) || (tradesAt >= 0 && !tradesArg)) {
+  console.error('Usage: node scripts/build-quests.ts <DefaultQuests dir> [out file] [--stacks <file>] [--trades <file>]');
   process.exit(2);
 }
 const src = resolve(srcArg);
@@ -44,6 +52,7 @@ const source = {
 const db = loadDb(files);
 const stacks = new Map<string, QuestStack>();
 const data = buildQuestbook(db, source, stacks);
+const { quests, lines } = data;
 
 mkdirSync(dirname(out), { recursive: true });
 const json = JSON.stringify(data);
@@ -58,6 +67,27 @@ writeFileSync(
   join(dirname(out), 'quests-raw.json'),
   JSON.stringify({ format: 1, source, root: 'config/betterquesting/DefaultQuests', files: Object.fromEntries(files) }),
 );
+
+// ---------------------------------------------------------------- vending machine trades
+
+const tradesFile = resolve(tradesArg ?? join(src, '..', '..', 'vendingmachine', 'tradeDatabase.json'));
+const vendingOut = join(dirname(out), 'vending.json');
+let tradeSummary = 'no vending machine trades';
+if (existsSync(tradesFile)) {
+  const vending = buildVending(readFileSync(tradesFile, 'utf8'), source, stacks);
+  writeFileSync(vendingOut, JSON.stringify(vending));
+  const unknown = vending.groups.flatMap((g) => g.quests).filter((q) => !quests[q]);
+  tradeSummary =
+    `${vending.groups.length} vending machine trade groups ` +
+    `(${vending.groups.reduce((n, g) => n + g.trades.length, 0)} trades)`;
+  if (unknown.length) console.warn(`trades unlocked by quests that do not exist (${unknown.length}): ${unknown.slice(0, 10).join(', ')}`);
+} else {
+  if (tradesArg) {
+    console.error(`no trade database at ${tradesFile}`);
+    process.exit(1);
+  }
+  rmSync(vendingOut, { force: true });
+}
 
 // ---------------------------------------------------------------- modpack resources
 
@@ -89,7 +119,6 @@ if (stacksArg) {
   console.log(`quest stacks: ${list.length} (${list.filter((x) => x.tag).length} with NBT) -> ${resolve(stacksArg)}`);
 }
 
-const { quests, lines } = data;
 const missing = lines.flatMap((l) => l.quests.filter((p) => !quests[p[0]]).map((p) => `${l.name}: ${p[0]}`));
 const placed = new Set(lines.flatMap((l) => l.quests.map((p) => p[0])));
 console.log(
@@ -98,4 +127,5 @@ console.log(
     `${Object.keys(quests).length - placed.size} unplaced, ${themes.length} extra themes, ` +
     `${(json.length / 1e6).toFixed(1)} MB -> ${out}`,
 );
+console.log(tradeSummary);
 if (missing.length) console.warn(`placements without a quest file (${missing.length}):\n  ${missing.slice(0, 20).join('\n  ')}`);

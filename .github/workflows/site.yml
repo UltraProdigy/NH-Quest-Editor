@@ -2,10 +2,10 @@ name: Build and deploy site
 
 # Builds the questbook site and publishes it to GitHub Pages.
 #
-# Quest data always comes from the modpack's master branch. Game data (item names and icons)
-# comes from this repository's "game-data" release, which is refreshed by running the
-# exporter (export.yml) whenever GTNH publishes a new daily build. If the export fails, the
-# site still deploys with the previous game data.
+# Quest data and the Vending Machine's trades always come from the modpack's master branch.
+# Game data (item names and icons) comes from this repository's "game-data" release, which is
+# refreshed by running the exporter (export.yml) whenever GTNH publishes a new daily build. If
+# the export fails, the site still deploys with the previous game data.
 
 on:
   push:
@@ -91,6 +91,7 @@ jobs:
           sparse-checkout: |
             config/betterquesting
             config/NEI
+            config/vendingmachine
           persist-credentials: false
 
       - name: Set up Node

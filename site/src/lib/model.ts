@@ -70,6 +70,41 @@ export interface QuestbookData {
   quests: Record<string, Quest>;
 }
 
+/**
+ * One exchange of the Vending Machine (com.cubefury.vendingmachine.trade.Trade): coins and items
+ * in, items out.
+ */
+export interface VendingTrade {
+  /** Coins paid, as the coin items the questbook shows for them (CurrencyItem.getItemRepresentation). */
+  coins: ItemRef[];
+  /** Items consumed. */
+  from: ItemRef[];
+  /** Items that must be present but are not consumed. */
+  keep: ItemRef[];
+  /** Items received. */
+  to: ItemRef[];
+}
+
+/** A trade group: trades that share a cooldown and unlock together (TradeGroup). */
+export interface VendingGroup {
+  id: string;
+  category: string;
+  /** Cooldown in seconds (-1: none). */
+  cooldown: number;
+  /** Trades allowed per cooldown (-1: no limit). */
+  maxTrades: number;
+  /** Quests that unlock the group (its "betterquesting" requirements). */
+  quests: string[];
+  trades: VendingTrade[];
+}
+
+/** public/data/vending.json: the modpack's config/vendingmachine/tradeDatabase.json. */
+export interface VendingData {
+  format: 1;
+  source: QuestbookData['source'];
+  groups: VendingGroup[];
+}
+
 /** Entry in the item index: display name and icon file. */
 export interface ItemInfo {
   /** Display name. */

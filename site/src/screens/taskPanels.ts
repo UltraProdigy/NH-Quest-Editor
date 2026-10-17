@@ -10,7 +10,7 @@ import {
 import { tr } from '../gui/lang.ts';
 import { stripFormatting, drawString } from '../gui/font.ts';
 import { itemName, fluidName } from '../gui/items.ts';
-import type { ItemRef, FluidRef, TaskData, Quest } from '../lib/model.ts';
+import type { ItemRef, FluidRef, TaskData, Quest, VendingTrade } from '../lib/model.ts';
 import { quest as getQuest } from '../store.ts';
 import { PanelButtonQuest } from './questCanvas.ts';
 
@@ -264,6 +264,31 @@ export function rewardPanel(reward: TaskData, rect: GuiRect, openQuest: (q: Ques
     default:
       return null;
   }
+}
+
+/**
+ * One vending machine exchange in a quest's reward column (vendingmachine's PanelQBTrade): the
+ * items and coins paid, an arrow, the items received, in one row of slots with their counts.
+ */
+export function tradePanel(trade: VendingTrade, rect: GuiRect): Panel {
+  const c = new CanvasMinimum(rect);
+  const orig = c.init.bind(c);
+  c.init = () => {
+    orig();
+    let x = 0;
+    const slot = (stack: ItemRef) => {
+      c.add(new PanelItemSlot(new Rect(x, 0, 18, 18), stack, { showCount: true }));
+      x += 20;
+    };
+    // Consumed items, then the ones only needed, then coins (as the coin item, value as count).
+    [...trade.from, ...trade.keep, ...trade.coins].forEach(slot);
+    // +1px each side: the 16px icon sits centred where an 18px slot would be.
+    c.add(new PanelGeneric(Transform.at(Align.TOP_LEFT, x + 1, 1, 16, 16), icon('right')));
+    x += 20;
+    trade.to.forEach(slot);
+    c.recalc();
+  };
+  return c;
 }
 
 /** Translation key for a task/reward type, e.g. "bq_standard:retrieval" -> "bq_standard.task.retrieval". */

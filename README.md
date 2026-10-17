@@ -7,6 +7,9 @@ recipes come from a headless export of the latest GTNH daily build.
 Click any item in a quest to see its recipes in an NEI-style window (right click for its uses).
 Crafting, smelting and all GregTech recipe maps are shown so far.
 
+Quests list the Vending Machine exchanges they unlock under their rewards, as BetterQuesting does
+in game. The trades come from the modpack's `config/vendingmachine/tradeDatabase.json`.
+
 Planned next: more recipe handlers.
 
 ## Editing quests
@@ -82,7 +85,8 @@ Needs Node 22.18 or newer.
 cd site
 npm install
 
-# Quest data from a checkout of GT-New-Horizons-Modpack
+# Quest data from a checkout of GT-New-Horizons-Modpack (and its vending machine trades, from
+# config/vendingmachine beside config/betterquesting)
 npm run data:quests -- ../../GT-New-Horizons-Modpack/config/betterquesting/DefaultQuests
 
 # Minecraft's font and a few GUI textures, downloaded from Mojang (not stored in this repository)
