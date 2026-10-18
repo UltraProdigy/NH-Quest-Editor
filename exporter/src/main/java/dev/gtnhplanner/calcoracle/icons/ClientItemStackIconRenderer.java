@@ -44,7 +44,16 @@ public final class ClientItemStackIconRenderer {
     private static final int GUI_ICON_CANVAS_SIZE = 32;
     private static final boolean USE_NEI_RENDERER = "nei".equals(System.getProperty("gtnh.oracle.iconRenderer", "oracle"));
     private static final int GUI_ITEM_SIZE = 16;
-    private static final int ICON_EXPORT_BATCH_SIZE = Integer.getInteger("gtnh.oracle.iconExportBatchSize", 64);
+    /** Time spent on icons per frame of the export screen. */
+    static final long ICON_FRAME_BUDGET_MS = Long.getLong("gtnh.oracle.iconFrameBudgetMs", 250L);
+    /**
+     * Whether rendered icons are also kept in the cache directory and reused from it by a later run
+     * (off with {@code -Dgtnh.oracle.iconCache=false}, as on CI, where nothing outlives the run).
+     */
+    static final boolean CACHE_ENABLED = !"false".equals(System.getProperty("gtnh.oracle.iconCache", "true"));
+    private static long renderNanos;
+    private static long processNanos;
+    private static long writeNanos;
     private static final int ICON_PROGRESS_EVERY = Integer.getInteger("gtnh.oracle.iconProgressEvery", 256);
     private static final int MAX_RENDER_WARNINGS = Integer.getInteger("gtnh.oracle.maxIconRenderWarnings", 50);
     private static final Map<String, String> ICONS_BY_STACK_KEY = new LinkedHashMap<String, String>();
@@ -126,14 +135,23 @@ public final class ClientItemStackIconRenderer {
         minecraft.displayGuiScreen(new QueuedIconExportScreen(afterExport));
     }
 
-    static BufferedImage renderStackToImage(ItemStack stack) throws Exception {
+    /** One off-screen framebuffer and readback buffer for every item render (created on first use). */
+    private static Framebuffer iconFramebuffer;
+    private static ByteBuffer iconReadback;
+
+    /** The stack drawn as the GUI draws it, as ARGB pixels (top row first), ICON_SIZE square. */
+    static int[] renderStackPixels(ItemStack stack) throws Exception {
         Minecraft minecraft = Minecraft.getMinecraft();
         if (minecraft == null || minecraft.getTextureManager() == null) {
             throw new IllegalStateException("Minecraft client is not ready.");
         }
 
-        Framebuffer framebuffer = new Framebuffer(ICON_SIZE, ICON_SIZE, true);
-        ByteBuffer buffer;
+        if (iconFramebuffer == null) {
+            iconFramebuffer = new Framebuffer(ICON_SIZE, ICON_SIZE, true);
+            iconReadback = BufferUtils.createByteBuffer(ICON_SIZE * ICON_SIZE * 4);
+        }
+        Framebuffer framebuffer = iconFramebuffer;
+        ByteBuffer buffer = iconReadback;
         boolean projectionPushed = false;
         boolean modelViewPushed = false;
 
@@ -187,7 +205,7 @@ public final class ClientItemStackIconRenderer {
             resetTessellator();
             GL11.glFlush();
 
-            buffer = BufferUtils.createByteBuffer(ICON_SIZE * ICON_SIZE * 4);
+            buffer.clear();
             GL11.glReadPixels(0, 0, ICON_SIZE, ICON_SIZE, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
         } finally {
             RenderHelper.disableStandardItemLighting();
@@ -203,10 +221,9 @@ public final class ClientItemStackIconRenderer {
             }
             GL11.glMatrixMode(GL11.GL_MODELVIEW);
             framebuffer.unbindFramebuffer();
-            framebuffer.deleteFramebuffer();
         }
 
-        return imageFromRgbaBuffer(buffer);
+        return IconPixels.argbFromRgba(buffer, ICON_SIZE, ICON_SIZE);
     }
 
     /**
@@ -227,42 +244,49 @@ public final class ClientItemStackIconRenderer {
         }
     }
 
-    private static BufferedImage renderWithContainerBaseIfNeeded(ItemStack stack, BufferedImage overlay) {
+    private static int[] renderWithContainerBaseIfNeeded(ItemStack stack, int[] overlay) {
         if (!shouldRenderContainerBase(stack)) {
             return overlay;
         }
 
         try {
-            BufferedImage base = renderContainerBaseImage(stack);
+            int[] base = renderContainerBasePixels(stack);
             if (base == null) {
                 return overlay;
             }
 
-            BufferedImage combined = new BufferedImage(overlay.getWidth(), overlay.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            // Composited with Java2D as before (source over), so the result is the same to the bit.
+            BufferedImage combined = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
             Graphics2D graphics = combined.createGraphics();
             try {
-                graphics.drawImage(base, 0, 0, null);
-                graphics.drawImage(overlay, 0, 0, null);
+                graphics.drawImage(toImage(base), 0, 0, null);
+                graphics.drawImage(toImage(overlay), 0, 0, null);
             } finally {
                 graphics.dispose();
             }
-            return combined;
+            return combined.getRGB(0, 0, ICON_SIZE, ICON_SIZE, null, 0, ICON_SIZE);
         } catch (Throwable ignored) {
             return overlay;
         }
     }
 
-    private static BufferedImage renderContainerBaseImage(ItemStack stack) throws Exception {
+    private static BufferedImage toImage(int[] argb) {
+        BufferedImage image = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(0, 0, ICON_SIZE, ICON_SIZE, argb, 0, ICON_SIZE);
+        return image;
+    }
+
+    private static int[] renderContainerBasePixels(ItemStack stack) throws Exception {
         if (isCapsuleStack(stack)) {
             ItemStack capsuleBase = new ItemStack(stack.getItem(), 1, 0);
-            BufferedImage capsuleImage = renderStackToImage(capsuleBase);
-            if (imageHasVisiblePixels(capsuleImage) && !isMissingTexture(capsuleImage)) {
-                return capsuleImage;
+            int[] capsule = renderStackPixels(capsuleBase);
+            if (IconPixels.anyVisible(capsule) && !looksLikeMissingTexture(capsule)) {
+                return capsule;
             }
         }
 
         Item emptyCellItem = (Item) Item.itemRegistry.getObject("IC2:itemCellEmpty");
-        return emptyCellItem == null ? null : renderStackToImage(new ItemStack(emptyCellItem, 1, 0));
+        return emptyCellItem == null ? null : renderStackPixels(new ItemStack(emptyCellItem, 1, 0));
     }
 
     private static boolean shouldRenderContainerBase(ItemStack stack) {
@@ -329,6 +353,8 @@ public final class ClientItemStackIconRenderer {
         private int skipped;
         private boolean finished;
 
+        private final long startedAt = System.nanoTime();
+
         private QueuedIconExportScreen(Runnable afterExport) {
             this.afterExport = afterExport;
             this.iterator = PENDING_STACKS_BY_KEY.entrySet().iterator();
@@ -338,9 +364,9 @@ public final class ClientItemStackIconRenderer {
                     + total
                     + " queued, size "
                     + ICON_SIZE
-                    + "px, batch "
-                    + ICON_EXPORT_BATCH_SIZE
-                    + "."
+                    + "px, "
+                    + ICON_FRAME_BUDGET_MS
+                    + " ms per frame."
             );
         }
 
@@ -350,11 +376,12 @@ public final class ClientItemStackIconRenderer {
                 return;
             }
 
-            int batch = 0;
-            while (batch < ICON_EXPORT_BATCH_SIZE && iterator.hasNext()) {
+            // As many icons as fit in the frame budget rather than a fixed count: every frame in
+            // between also draws the game behind this screen, so fewer, fuller frames waste less.
+            long frameStart = System.nanoTime();
+            while (iterator.hasNext() && System.nanoTime() - frameStart < ICON_FRAME_BUDGET_MS * 1000000L) {
                 Map.Entry<String, ItemStack> entry = iterator.next();
                 processed++;
-                batch++;
                 try {
                     MaterializedIconResult result = materializeIcon(entry.getKey(), entry.getValue());
                     if (result == MaterializedIconResult.RENDERED) {
@@ -382,7 +409,9 @@ public final class ClientItemStackIconRenderer {
                             + cacheHits
                             + ", skipped "
                             + skipped
-                            + ")."
+                            + ", "
+                            + (System.nanoTime() - startedAt) / 1000000000L
+                            + " s)."
                     );
                 }
             }
@@ -397,7 +426,15 @@ public final class ClientItemStackIconRenderer {
                         + cacheHits
                         + ", skipped "
                         + skipped
-                        + "."
+                        + " in "
+                        + (System.nanoTime() - startedAt) / 1000000000L
+                        + " s (render "
+                        + renderNanos / 1000000000L
+                        + " s, checks and shrinking "
+                        + processNanos / 1000000000L
+                        + " s, handing to the PNG writer "
+                        + writeNanos / 1000000000L
+                        + " s; the rest is the frames in between)."
                 );
                 ClientFluidStackIconRenderer.exportQueuedIconsThen(new Runnable() {
                     @Override
@@ -438,7 +475,7 @@ public final class ClientItemStackIconRenderer {
         }
 
         File cachedFile = cacheFileForKey(key, filename);
-        if (cachedFile.isFile()) {
+        if (CACHE_ENABLED && cachedFile.isFile()) {
             if (isUsableCachedIcon(cachedFile)) {
                 Files.copy(cachedFile.toPath(), outFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 return MaterializedIconResult.CACHE_HIT;
@@ -446,7 +483,7 @@ public final class ClientItemStackIconRenderer {
             cachedFile.delete();
         }
         File legacyCachedFile = cacheFile(filename);
-        if (legacyCachedFile.isFile()) {
+        if (CACHE_ENABLED && legacyCachedFile.isFile()) {
             if (isUsableCachedIcon(legacyCachedFile)) {
                 Files.copy(legacyCachedFile.toPath(), outFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 Files.copy(legacyCachedFile.toPath(), cachedFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
@@ -455,19 +492,26 @@ public final class ClientItemStackIconRenderer {
             legacyCachedFile.delete();
         }
 
-        BufferedImage image = renderStackToImage(stack);
-        applyMissingItemTint(stack, image);
-        image = renderWithContainerBaseIfNeeded(stack, image);
-        if (!imageHasVisiblePixels(image) || isMissingTexture(image)) {
+        long start = System.nanoTime();
+        int[] pixels = renderStackPixels(stack);
+        long rendered = System.nanoTime();
+        applyMissingItemTint(stack, pixels);
+        pixels = renderWithContainerBaseIfNeeded(stack, pixels);
+        if (!IconPixels.anyVisible(pixels) || looksLikeMissingTexture(pixels)) {
             ICONS_BY_STACK_KEY.put(key, "");
+            renderNanos += rendered - start;
+            processNanos += System.nanoTime() - rendered;
             return MaterializedIconResult.SKIPPED;
         }
-        ImageIO.write(image, "png", outFile);
-        File cacheDir = cacheDir();
-        if (!cacheDir.exists()) {
-            cacheDir.mkdirs();
-        }
-        ImageIO.write(image, "png", cachedFile);
+        // Stored at the smallest size that loses nothing (nearest-neighbour enlarging gives back the
+        // full render exactly), as the quest stack icons are; the site draws icons point-sampled.
+        int side = IconPixels.losslessSide(pixels, ICON_SIZE, GUI_ICON_CANVAS_SIZE);
+        int[] stored = IconPixels.shrink(pixels, ICON_SIZE, side);
+        long processed = System.nanoTime();
+        PngWriter.write(stored, side, side, outFile, CACHE_ENABLED ? cachedFile : null);
+        renderNanos += rendered - start;
+        processNanos += processed - rendered;
+        writeNanos += System.nanoTime() - processed;
         return MaterializedIconResult.RENDERED;
     }
 
@@ -478,21 +522,6 @@ public final class ClientItemStackIconRenderer {
         } catch (Throwable ignored) {
             return false;
         }
-    }
-
-    static BufferedImage imageFromRgbaBuffer(ByteBuffer buffer) {
-        BufferedImage image = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < ICON_SIZE; y++) {
-            for (int x = 0; x < ICON_SIZE; x++) {
-                int index = (x + (ICON_SIZE - 1 - y) * ICON_SIZE) * 4;
-                int red = buffer.get(index) & 255;
-                int green = buffer.get(index + 1) & 255;
-                int blue = buffer.get(index + 2) & 255;
-                int alpha = buffer.get(index + 3) & 255;
-                image.setRGB(x, y, (alpha << 24) | (red << 16) | (green << 8) | blue);
-            }
-        }
-        return image;
     }
 
     static boolean imageHasVisiblePixels(BufferedImage image) {
@@ -535,13 +564,13 @@ public final class ClientItemStackIconRenderer {
         return shown > 0 && magenta * 4 >= shown && black * 4 >= shown && (magenta + black) * 10 >= shown * 9;
     }
 
-    private static void applyMissingItemTint(ItemStack stack, BufferedImage image) {
+    private static void applyMissingItemTint(ItemStack stack, int[] pixels) {
         int color = stackTintColor(stack);
         if (color < 0) {
             return;
         }
 
-        if ((color & 0x00FFFFFF) == 0x00FFFFFF || !imageLooksUntinted(image)) {
+        if ((color & 0x00FFFFFF) == 0x00FFFFFF || !imageLooksUntinted(pixels)) {
             return;
         }
 
@@ -549,42 +578,37 @@ public final class ClientItemStackIconRenderer {
         int tintGreen = (color >> 8) & 255;
         int tintBlue = color & 255;
 
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                int value = image.getRGB(x, y);
-                int alpha = (value >>> 24) & 255;
-                if (alpha == 0) {
-                    continue;
-                }
-
-                int red = (((value >> 16) & 255) * tintRed) / 255;
-                int green = (((value >> 8) & 255) * tintGreen) / 255;
-                int blue = ((value & 255) * tintBlue) / 255;
-                image.setRGB(x, y, (alpha << 24) | (red << 16) | (green << 8) | blue);
+        for (int i = 0; i < pixels.length; i++) {
+            int value = pixels[i];
+            int alpha = (value >>> 24) & 255;
+            if (alpha == 0) {
+                continue;
             }
+
+            int red = (((value >> 16) & 255) * tintRed) / 255;
+            int green = (((value >> 8) & 255) * tintGreen) / 255;
+            int blue = ((value & 255) * tintBlue) / 255;
+            pixels[i] = (alpha << 24) | (red << 16) | (green << 8) | blue;
         }
     }
 
-    private static boolean imageLooksUntinted(BufferedImage image) {
+    private static boolean imageLooksUntinted(int[] pixels) {
         int visiblePixels = 0;
         int neutralPixels = 0;
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                int value = image.getRGB(x, y);
-                int alpha = (value >>> 24) & 255;
-                if (alpha == 0) {
-                    continue;
-                }
+        for (int value : pixels) {
+            int alpha = (value >>> 24) & 255;
+            if (alpha == 0) {
+                continue;
+            }
 
-                visiblePixels++;
-                int red = (value >> 16) & 255;
-                int green = (value >> 8) & 255;
-                int blue = value & 255;
-                int max = Math.max(red, Math.max(green, blue));
-                int min = Math.min(red, Math.min(green, blue));
-                if (max - min <= 10) {
-                    neutralPixels++;
-                }
+            visiblePixels++;
+            int red = (value >> 16) & 255;
+            int green = (value >> 8) & 255;
+            int blue = value & 255;
+            int max = Math.max(red, Math.max(green, blue));
+            int min = Math.min(red, Math.min(green, blue));
+            if (max - min <= 10) {
+                neutralPixels++;
             }
         }
 

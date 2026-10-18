@@ -5,6 +5,7 @@ import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartedEvent;
+import dev.gtnhplanner.calcoracle.icons.PngWriter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -75,6 +76,7 @@ public final class GtnhCalcOracleMod {
                     return;
                 }
 
+                PngWriter.awaitAll();
                 FMLCommonHandler.instance().exitJava(0, false);
             }
         };
@@ -104,6 +106,8 @@ public final class GtnhCalcOracleMod {
             method.invoke(null, new Runnable() {
                 @Override
                 public void run() {
+                    // The PNGs are encoded in the background: wait for the last ones before exiting.
+                    PngWriter.awaitAll();
                     LOG.info("GTNH calculation oracle icon export finished.");
                     FMLCommonHandler.instance().exitJava(0, false);
                 }

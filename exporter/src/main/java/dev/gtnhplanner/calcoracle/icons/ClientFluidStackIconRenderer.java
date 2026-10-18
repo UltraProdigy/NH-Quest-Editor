@@ -1,6 +1,5 @@
 package dev.gtnhplanner.calcoracle.icons;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -12,7 +11,6 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import javax.imageio.ImageIO;
 
 import dev.gtnhplanner.calcoracle.GtnhCalcOracleMod;
 
@@ -32,7 +30,6 @@ public final class ClientFluidStackIconRenderer {
     private static final int ICON_SIZE = Integer.getInteger("gtnh.oracle.iconSize", 256);
     private static final int GUI_ICON_CANVAS_SIZE = 32;
     private static final int GUI_ITEM_SIZE = 16;
-    private static final int ICON_EXPORT_BATCH_SIZE = Integer.getInteger("gtnh.oracle.iconExportBatchSize", 64);
     private static final int ICON_PROGRESS_EVERY = Integer.getInteger("gtnh.oracle.iconProgressEvery", 256);
     private static final int MAX_RENDER_WARNINGS = Integer.getInteger("gtnh.oracle.maxFluidIconRenderWarnings", 50);
     private static final Map<String, String> ICONS_BY_FLUID_KEY = new LinkedHashMap<String, String>();
@@ -96,9 +93,7 @@ public final class ClientFluidStackIconRenderer {
                     + total
                     + " queued, size "
                     + ICON_SIZE
-                    + "px, batch "
-                    + ICON_EXPORT_BATCH_SIZE
-                    + "."
+                    + "px."
             );
         }
 
@@ -108,11 +103,11 @@ public final class ClientFluidStackIconRenderer {
                 return;
             }
 
-            int batch = 0;
-            while (batch < ICON_EXPORT_BATCH_SIZE && iterator.hasNext()) {
+            long frameStart = System.nanoTime();
+            long budget = ClientItemStackIconRenderer.ICON_FRAME_BUDGET_MS * 1000000L;
+            while (iterator.hasNext() && System.nanoTime() - frameStart < budget) {
                 Map.Entry<String, FluidStack> entry = iterator.next();
                 processed++;
-                batch++;
                 try {
                     MaterializedFluidIconResult result = materializeIcon(entry.getKey(), entry.getValue());
                     if (result == MaterializedFluidIconResult.RENDERED) {
@@ -184,34 +179,35 @@ public final class ClientFluidStackIconRenderer {
             return MaterializedFluidIconResult.SKIPPED;
         }
 
+        boolean cache = ClientItemStackIconRenderer.CACHE_ENABLED;
         File cachedFile = ClientItemStackIconRenderer.cacheFileForKey("fluid:" + key, filename);
-        if (cachedFile.isFile()) {
+        if (cache && cachedFile.isFile()) {
             Files.copy(cachedFile.toPath(), outFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             return MaterializedFluidIconResult.CACHE_HIT;
         }
         File legacyCachedFile = ClientItemStackIconRenderer.cacheFile(filename);
-        if (legacyCachedFile.isFile()) {
+        if (cache && legacyCachedFile.isFile()) {
             Files.copy(legacyCachedFile.toPath(), outFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             Files.copy(legacyCachedFile.toPath(), cachedFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             return MaterializedFluidIconResult.CACHE_HIT;
         }
 
-        BufferedImage image = renderFluidToImage(stack);
-        if (!ClientItemStackIconRenderer.imageHasVisiblePixels(image)) {
+        int[] pixels = renderFluidPixels(stack);
+        if (!IconPixels.anyVisible(pixels)) {
             ICONS_BY_FLUID_KEY.put(key, "");
             return MaterializedFluidIconResult.SKIPPED;
         }
 
-        ImageIO.write(image, "png", outFile);
-        File cacheDir = ClientItemStackIconRenderer.cacheDir();
-        if (!cacheDir.exists()) {
-            cacheDir.mkdirs();
-        }
-        ImageIO.write(image, "png", cachedFile);
+        // At the smallest size that loses nothing, like the item icons.
+        int side = IconPixels.losslessSide(pixels, ICON_SIZE, GUI_ICON_CANVAS_SIZE);
+        PngWriter.write(IconPixels.shrink(pixels, ICON_SIZE, side), side, side, outFile, cache ? cachedFile : null);
         return MaterializedFluidIconResult.RENDERED;
     }
 
-    private static BufferedImage renderFluidToImage(FluidStack stack) throws Exception {
+    private static Framebuffer fluidFramebuffer;
+    private static ByteBuffer fluidReadback;
+
+    private static int[] renderFluidPixels(FluidStack stack) throws Exception {
         Minecraft minecraft = Minecraft.getMinecraft();
         if (minecraft == null || minecraft.getTextureManager() == null) {
             throw new IllegalStateException("Minecraft client is not ready.");
@@ -222,8 +218,12 @@ public final class ClientFluidStackIconRenderer {
             throw new IllegalStateException("Fluid has no still icon: " + stack.getFluid().getName());
         }
 
-        Framebuffer framebuffer = new Framebuffer(ICON_SIZE, ICON_SIZE, true);
-        ByteBuffer buffer;
+        if (fluidFramebuffer == null) {
+            fluidFramebuffer = new Framebuffer(ICON_SIZE, ICON_SIZE, true);
+            fluidReadback = BufferUtils.createByteBuffer(ICON_SIZE * ICON_SIZE * 4);
+        }
+        Framebuffer framebuffer = fluidFramebuffer;
+        ByteBuffer buffer = fluidReadback;
         boolean projectionPushed = false;
         boolean modelViewPushed = false;
 
@@ -269,7 +269,7 @@ public final class ClientFluidStackIconRenderer {
             GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
             GL11.glFlush();
 
-            buffer = BufferUtils.createByteBuffer(ICON_SIZE * ICON_SIZE * 4);
+            buffer.clear();
             GL11.glReadPixels(0, 0, ICON_SIZE, ICON_SIZE, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
         } finally {
             ClientItemStackIconRenderer.resetTessellator();
@@ -284,10 +284,9 @@ public final class ClientFluidStackIconRenderer {
             }
             GL11.glMatrixMode(GL11.GL_MODELVIEW);
             framebuffer.unbindFramebuffer();
-            framebuffer.deleteFramebuffer();
         }
 
-        return ClientItemStackIconRenderer.imageFromRgbaBuffer(buffer);
+        return IconPixels.argbFromRgba(buffer, ICON_SIZE, ICON_SIZE);
     }
 
     private static IIcon fluidIcon(FluidStack stack) {

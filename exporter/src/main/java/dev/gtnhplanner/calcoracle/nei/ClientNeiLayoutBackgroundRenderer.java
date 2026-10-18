@@ -1,12 +1,12 @@
 package dev.gtnhplanner.calcoracle.nei;
 
 import dev.gtnhplanner.calcoracle.GtnhCalcOracleMod;
+import dev.gtnhplanner.calcoracle.icons.IconPixels;
+import dev.gtnhplanner.calcoracle.icons.PngWriter;
 import net.minecraft.client.shader.Framebuffer;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
@@ -64,7 +64,7 @@ public final class ClientNeiLayoutBackgroundRenderer {
 
             ByteBuffer buffer = BufferUtils.createByteBuffer(width * height * 4);
             GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
-            ImageIO.write(imageFromRgbaBuffer(buffer, width, height), "png", output);
+            PngWriter.write(IconPixels.argbFromRgba(buffer, width, height), width, height, output);
         } catch (Throwable t) {
             GtnhCalcOracleMod.LOG.warn("Could not render NEI handler background for {}.", signature, t);
             return null;
@@ -86,21 +86,6 @@ public final class ClientNeiLayoutBackgroundRenderer {
         return datasetVersionId.length() == 0
             ? output.getAbsolutePath()
             : "/datasets/gtnh/" + datasetVersionId + "/textures/nei-layouts/" + fileName;
-    }
-
-    private static BufferedImage imageFromRgbaBuffer(ByteBuffer buffer, int width, int height) {
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int index = ((height - 1 - y) * width + x) * 4;
-                int r = buffer.get(index) & 0xFF;
-                int g = buffer.get(index + 1) & 0xFF;
-                int b = buffer.get(index + 2) & 0xFF;
-                int a = buffer.get(index + 3) & 0xFF;
-                image.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | b);
-            }
-        }
-        return image;
     }
 
     private static String safeName(String value) {

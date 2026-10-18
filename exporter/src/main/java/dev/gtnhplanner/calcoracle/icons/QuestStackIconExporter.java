@@ -1,6 +1,5 @@
 package dev.gtnhplanner.calcoracle.icons;
 
-import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -14,7 +13,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.imageio.ImageIO;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -116,6 +114,9 @@ public final class QuestStackIconExporter {
     private static ByteBuffer readback;
     private static DynamicTexture blankGlint;
     private static final FloatBuffer LIGHT_BUFFER = BufferUtils.createFloatBuffer(4);
+    /** Where the pass spends its time, for the log. */
+    private static long renderNanos, tickNanos, sleepNanos, writeNanos;
+    private static int renders, ticks;
 
     private QuestStackIconExporter() {}
 
@@ -151,6 +152,7 @@ public final class QuestStackIconExporter {
         private int index;
         private int rendered, lit, animated, random, clockDriven, tooLong, glint, noItem, invisible, failed;
         private boolean finished;
+        private final long startedAt = System.nanoTime();
 
         private ExportScreen(List<JsonObject> entries, Runnable after) {
             this.entries = entries;
@@ -184,7 +186,11 @@ public final class QuestStackIconExporter {
             if (index >= entries.size()) {
                 finished = true;
                 writeManifest();
-                GtnhCalcOracleMod.LOG.info("GTNH quest stack icons finished.");
+                GtnhCalcOracleMod.LOG.info(
+                    "GTNH quest stack icons finished in " + (System.nanoTime() - startedAt) / 1000000000L + " s: "
+                        + renders + " renders (" + renderNanos / 1000000000L + " s), " + ticks + " game ticks ("
+                        + tickNanos / 1000000000L + " s), waiting for the clock " + sleepNanos / 1000000000L
+                        + " s, strips " + writeNanos / 1000000000L + " s; the rest is comparing renders and the frames in between.");
                 after.run();
             }
         }
@@ -517,14 +523,14 @@ public final class QuestStackIconExporter {
      */
     private static List<int[]> randomSamples(ItemStack stack, int[] first, long firstAt) throws Exception {
         long wait = firstAt + RANDOM_CHECK_MS - System.currentTimeMillis();
-        if (wait > 0) Thread.sleep(wait);
+        if (wait > 0) sleep(wait);
         int[] again = render(stack, Lights.GUI);
         if (same(again, first)) return null;
         List<int[]> out = new ArrayList<int[]>();
         out.add(first);
         out.add(again);
         while (out.size() < RANDOM_FRAMES) {
-            Thread.sleep(RANDOM_FRAME_SPACING_MS);
+            sleep(RANDOM_FRAME_SPACING_MS);
             out.add(render(stack, Lights.GUI));
         }
         long near = differingPixels(out.get(0), out.get(1)), far = 0;
@@ -536,6 +542,12 @@ public final class QuestStackIconExporter {
             return still;
         }
         return out;
+    }
+
+    private static void sleep(long ms) throws InterruptedException {
+        long start = System.nanoTime();
+        Thread.sleep(ms);
+        sleepNanos += System.nanoTime() - start;
     }
 
     private static long differingPixels(int[] a, int[] b) {
@@ -562,6 +574,16 @@ public final class QuestStackIconExporter {
 
     /** One game tick for everything an item render can animate with. */
     private static void tickGame() {
+        long start = System.nanoTime();
+        try {
+            tickGameUntimed();
+        } finally {
+            tickNanos += System.nanoTime() - start;
+            ticks++;
+        }
+    }
+
+    private static void tickGameUntimed() {
         Minecraft.getMinecraft().getTextureManager().tick();
         if (!gtLookedUp) {
             gtLookedUp = true;
@@ -640,6 +662,16 @@ public final class QuestStackIconExporter {
 
     /** Renders one stack the way the in-game GUI does, with the given lights, into ARGB pixels (top row first). */
     private static int[] render(ItemStack stack, Lights lights) {
+        long start = System.nanoTime();
+        try {
+            return renderUntimed(stack, lights);
+        } finally {
+            renderNanos += System.nanoTime() - start;
+            renders++;
+        }
+    }
+
+    private static int[] renderUntimed(ItemStack stack, Lights lights) {
         Minecraft mc = Minecraft.getMinecraft();
         if (framebuffer == null) {
             framebuffer = new Framebuffer(SIZE, SIZE, true);
@@ -689,16 +721,7 @@ public final class QuestStackIconExporter {
             GL11.glMatrixMode(GL11.GL_MODELVIEW);
             framebuffer.unbindFramebuffer();
         }
-        int[] out = new int[SIZE * SIZE];
-        for (int y = 0; y < SIZE; y++) {
-            int row = (SIZE - 1 - y) * SIZE * 4;
-            for (int x = 0; x < SIZE; x++) {
-                int i = row + x * 4;
-                out[y * SIZE + x] = ((readback.get(i + 3) & 255) << 24) | ((readback.get(i) & 255) << 16)
-                    | ((readback.get(i + 1) & 255) << 8) | (readback.get(i + 2) & 255);
-            }
-        }
-        return out;
+        return IconPixels.argbFromRgba(readback, SIZE, SIZE);
     }
 
     /** Light parameters on top of the GUI item lighting (positions are kept, only strengths change). */
@@ -738,18 +761,15 @@ public final class QuestStackIconExporter {
 
     /** Writes the layers as one vertical strip, at the smallest size that keeps every pixel (see the class notes). */
     private static void writeStrip(File file, List<int[]> layers) throws Exception {
+        long start = System.nanoTime();
         int out = layerSize(layers);
-        int step = SIZE / out;
-        BufferedImage image = new BufferedImage(out, out * layers.size(), BufferedImage.TYPE_INT_ARGB);
-        int[] row = new int[out * out];
+        int[] strip = new int[out * out * layers.size()];
         for (int i = 0; i < layers.size(); i++) {
-            int[] px = layers.get(i);
-            for (int y = 0; y < out; y++) {
-                for (int x = 0; x < out; x++) row[y * out + x] = px[y * step * SIZE + x * step];
-            }
-            image.setRGB(0, i * out, out, out, row, 0, out);
+            int[] layer = IconPixels.shrink(layers.get(i), SIZE, out);
+            System.arraycopy(layer, 0, strip, i * out * out, out * out);
         }
-        ImageIO.write(image, "png", file);
+        PngWriter.write(strip, out, out * layers.size(), file);
+        writeNanos += System.nanoTime() - start;
     }
 
     /** Side of the layers as stored: the smallest that keeps every pixel. */
@@ -762,19 +782,7 @@ public final class QuestStackIconExporter {
     /** Whether every step x step block of every layer is one colour (fully transparent pixels count as equal). */
     private static boolean uniformBlocks(List<int[]> layers, int step) {
         for (int[] px : layers) {
-            for (int by = 0; by < SIZE; by += step) {
-                for (int bx = 0; bx < SIZE; bx += step) {
-                    int first = px[by * SIZE + bx];
-                    if ((first >>> 24) == 0) first = 0;
-                    for (int y = by; y < by + step; y++) {
-                        for (int x = bx; x < bx + step; x++) {
-                            int v = px[y * SIZE + x];
-                            if ((v >>> 24) == 0) v = 0;
-                            if (v != first) return false;
-                        }
-                    }
-                }
-            }
+            if (!IconPixels.uniformBlocks(px, SIZE, step)) return false;
         }
         return true;
     }

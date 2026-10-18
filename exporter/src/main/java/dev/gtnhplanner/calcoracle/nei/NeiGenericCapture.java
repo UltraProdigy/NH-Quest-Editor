@@ -6,7 +6,6 @@ import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.field;
 import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.iterable;
 import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.staticField;
 
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -21,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import javax.imageio.ImageIO;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
@@ -36,6 +34,8 @@ import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 
 import dev.gtnhplanner.calcoracle.GtnhCalcOracleMod;
+import dev.gtnhplanner.calcoracle.icons.IconPixels;
+import dev.gtnhplanner.calcoracle.icons.PngWriter;
 
 /**
  * Captures what NEI shows for recipe handlers the site has no port of, the same way for every
@@ -774,25 +774,14 @@ public final class NeiGenericCapture {
             }
             String file = hash.substring(0, 16) + ".png";
             if (imageDir != null) {
-                ImageIO.write(image(bytes, width, height), "png", new File(imageDir, file));
+                PngWriter.write(IconPixels.argbFromRgba(ByteBuffer.wrap(bytes), width, height), width, height,
+                    new File(imageDir, file));
             }
             id = Integer.valueOf(images.size());
             images.add(file);
             imageIds.put(hash, id);
             return id.intValue();
         }
-    }
-
-    private static BufferedImage image(byte[] rgba, int width, int height) {
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int i = ((height - 1 - y) * width + x) * 4;
-                int r = rgba[i] & 0xFF, g = rgba[i + 1] & 0xFF, b = rgba[i + 2] & 0xFF, a = rgba[i + 3] & 0xFF;
-                image.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | b);
-            }
-        }
-        return image;
     }
 
     // ------------------------------------------------------------------------------------- helpers
