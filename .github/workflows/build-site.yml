@@ -1,0 +1,144 @@
+name: Build site
+
+# Builds the questbook site into a Pages artifact. Called by site.yml: once straight away with the
+# game data already published, and again after an export has published newer game data.
+#
+# The NEI recipe data (public/data/nei, mostly the icon sheets) depends only on the game data
+# release, the modpack's NEI handler ordering and the scripts that build it, so it is cached on
+# those and only rebuilt when one of them changes.
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: "Name of the Pages artifact to upload"
+        type: string
+        default: github-pages
+      ref:
+        description: "Commit of this repository to build (empty = the one that triggered the run)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Check out modpack quests
+        uses: actions/checkout@v5
+        with:
+          repository: GTNewHorizons/GT-New-Horizons-Modpack
+          ref: master
+          path: modpack
+          sparse-checkout: |
+            config/betterquesting
+            config/NEI
+            config/vendingmachine
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        # QUESTS_DIR turns on the round-trip test: every DefaultQuests file must load and save
+        # byte for byte, or the editor's exports would not match what BetterQuesting writes.
+        env:
+          QUESTS_DIR: ../modpack/config/betterquesting/DefaultQuests
+        run: npm test
+
+      - name: Fetch vanilla font from the Minecraft client
+        run: npm run data:vanilla
+
+      - name: Build quest data
+        run: |
+          export QUESTS_REPO=GTNewHorizons/GT-New-Horizons-Modpack
+          export QUESTS_COMMIT=$(git -C ../modpack rev-parse HEAD)
+          export QUESTS_DATE=$(git -C ../modpack log -1 --format=%cI)
+          npm run data:quests -- ../modpack/config/betterquesting/DefaultQuests
+
+      - name: Download game data
+        id: gamedata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ../game-data
+          # Release assets get a new id whenever they are uploaded again, even for the same daily
+          # build. Read before downloading, so an upload in between can't pair new ids with old files.
+          ids=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/game-data" \
+            --jq '[.assets[] | select(.name == "export.json.gz" or .name == "icons-full.tar.gz") | .id] | sort | map(tostring) | join("-")' \
+            2>/dev/null || true)
+          if gh release download game-data -R "$GITHUB_REPOSITORY" -D ../game-data \
+              -p export.json.gz -p icons-full.tar.gz -p daily-tag.txt; then
+            # Item icons, and the pictures the exporter captured of NEI handlers (nei-layouts).
+            tar -xzf ../game-data/icons-full.tar.gz -C ../game-data
+            echo "tag=$(cat ../game-data/daily-tag.txt)" >> "$GITHUB_OUTPUT"
+            echo "version=${ids:-unknown-$GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=No game data::The game-data release does not exist yet; items show placeholders."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore recipe data
+        id: nei
+        if: steps.gamedata.outputs.found == 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: site/public/data/nei
+          key: nei-${{ steps.gamedata.outputs.version }}-${{ hashFiles('modpack/config/NEI/handlerordering.csv', 'site/scripts/build-recipes.ts', 'site/scripts/gtLookup.ts', 'site/scripts/jsonStream.ts', 'site/src/nei/**', 'site/package-lock.json') }}
+
+      - name: Build item data
+        if: steps.gamedata.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAILY_TAG: ${{ steps.gamedata.outputs.tag }}
+        run: |
+          npm run data:items -- ../game-data/export.json.gz ../game-data/icons public/data/questbook.json
+          # NEI, GregTech and ModularUI GUI textures (LGPL) from the pack's jars, for the recipe views.
+          if gh release download game-data -R "$GITHUB_REPOSITORY" -D ../game-data -p gui-textures.tar.gz; then
+            tar -xzf ../game-data/gui-textures.tar.gz -C public
+          else
+            echo "::warning title=No GUI textures::The game-data release has no gui-textures.tar.gz yet; recipe windows lack their textures until the next export."
+          fi
+
+      - name: Build recipe data
+        if: steps.gamedata.outputs.found == 'true' && steps.nei.outputs.cache-hit != 'true'
+        env:
+          DAILY_TAG: ${{ steps.gamedata.outputs.tag }}
+        run: |
+          npm run data:recipes -- ../game-data/export.json.gz ../game-data/icons public/data/nei \
+            --ordering ../modpack/config/NEI/handlerordering.csv
+
+      - name: Save recipe data
+        if: steps.gamedata.outputs.found == 'true' && steps.nei.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: site/public/data/nei
+          key: ${{ steps.nei.outputs.cache-primary-key }}
+
+      - name: Build site
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: site/dist

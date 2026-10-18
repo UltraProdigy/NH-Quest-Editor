@@ -74,7 +74,8 @@ site/        the website (TypeScript + Vite, no framework; the GUI is drawn on a
 exporter/    Forge 1.7.10 mod that exports items, icons and recipes from a running client
 .github/workflows/
   export.yml     runs a daily build headless with the exporter, publishes the "game-data" release
-  site.yml       builds the site from modpack master + game data and deploys GitHub Pages
+  site.yml       deploys GitHub Pages: at once with the current game data, again after a new export
+  build-site.yml builds the site from modpack master + game data (called by site.yml)
 ```
 
 ## Working on the site

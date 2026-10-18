@@ -4,8 +4,12 @@ name: Build and deploy site
 #
 # Quest data and the Vending Machine's trades always come from the modpack's master branch.
 # Game data (item names and icons) comes from this repository's "game-data" release, which is
-# refreshed by running the exporter (export.yml) whenever GTNH publishes a new daily build. If
-# the export fails, the site still deploys with the previous game data.
+# refreshed by running the exporter (export.yml) whenever GTNH publishes a new daily build.
+#
+# The site is built and deployed straight away with the game data already published, so quest
+# changes go live in a few minutes. When there is a new daily build, the export runs alongside,
+# and once it has published, the site is built and deployed again with the new game data. If the
+# export fails, the site stays deployed with the previous game data.
 
 on:
   push:
@@ -13,6 +17,7 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/site.yml"
+      - ".github/workflows/build-site.yml"
   schedule:
     - cron: "23 7 * * *"
   workflow_dispatch:
@@ -25,10 +30,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: site
-  cancel-in-progress: false
 
 jobs:
   check:
@@ -58,106 +59,19 @@ jobs:
             echo "Run export: \`$export\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  export:
-    needs: check
-    if: needs.check.outputs.export == 'true'
-    permissions:
-      contents: write
-    uses: ./.github/workflows/export.yml
-    with:
-      daily_tag: ${{ needs.check.outputs.tag }}
-      publish: true
-
   build:
-    needs: [check, export]
-    # Deploy fresh quest data even when there was no export, or the export failed.
-    if: always() && needs.check.result == 'success'
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: site
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-
-      - name: Check out modpack quests
-        uses: actions/checkout@v5
-        with:
-          repository: GTNewHorizons/GT-New-Horizons-Modpack
-          ref: master
-          path: modpack
-          sparse-checkout: |
-            config/betterquesting
-            config/NEI
-            config/vendingmachine
-          persist-credentials: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: site/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Test
-        # QUESTS_DIR turns on the round-trip test: every DefaultQuests file must load and save
-        # byte for byte, or the editor's exports would not match what BetterQuesting writes.
-        env:
-          QUESTS_DIR: ../modpack/config/betterquesting/DefaultQuests
-        run: npm test
-
-      - name: Fetch vanilla font from the Minecraft client
-        run: npm run data:vanilla
-
-      - name: Build quest data
-        run: |
-          export QUESTS_REPO=GTNewHorizons/GT-New-Horizons-Modpack
-          export QUESTS_COMMIT=$(git -C ../modpack rev-parse HEAD)
-          export QUESTS_DATE=$(git -C ../modpack log -1 --format=%cI)
-          npm run data:quests -- ../modpack/config/betterquesting/DefaultQuests
-
-      - name: Build item data
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p ../game-data
-          if gh release download game-data -R "$GITHUB_REPOSITORY" -D ../game-data \
-              -p export.json.gz -p icons-full.tar.gz -p daily-tag.txt; then
-            # Item icons, and the pictures the exporter captured of NEI handlers (nei-layouts).
-            tar -xzf ../game-data/icons-full.tar.gz -C ../game-data
-            DAILY_TAG=$(cat ../game-data/daily-tag.txt) npm run data:items -- \
-              ../game-data/export.json.gz ../game-data/icons public/data/questbook.json
-            DAILY_TAG=$(cat ../game-data/daily-tag.txt) npm run data:recipes -- \
-              ../game-data/export.json.gz ../game-data/icons public/data/nei \
-              --ordering ../modpack/config/NEI/handlerordering.csv
-            # NEI, GregTech and ModularUI GUI textures (LGPL) from the pack's jars, for the recipe views.
-            if gh release download game-data -R "$GITHUB_REPOSITORY" -D ../game-data -p gui-textures.tar.gz; then
-              tar -xzf ../game-data/gui-textures.tar.gz -C public
-            else
-              echo "::warning title=No GUI textures::The game-data release has no gui-textures.tar.gz yet; recipe windows lack their textures until the next export."
-            fi
-          else
-            echo "::warning title=No game data::The game-data release does not exist yet; items show placeholders."
-          fi
-
-      - name: Build site
-        run: npm run build
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: site/dist
+    needs: check
+    uses: ./.github/workflows/build-site.yml
+    with:
+      artifact: github-pages
 
   deploy:
     needs: build
-    # build ran under always(), so a skipped export upstream would otherwise skip this job too.
-    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-24.04
+    # One deployment at a time; a newer one waits for the one in progress.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write
@@ -168,3 +82,48 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deploy
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
+
+  export:
+    needs: check
+    if: needs.check.outputs.export == 'true'
+    # Two exports at once would both replace the game-data release.
+    concurrency:
+      group: export
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    uses: ./.github/workflows/export.yml
+    with:
+      daily_tag: ${{ needs.check.outputs.tag }}
+      publish: true
+
+  rebuild:
+    # After the first deployment too, so the one with the new game data is the one that stays.
+    needs: [export, deploy]
+    if: always() && needs.export.result == 'success'
+    uses: ./.github/workflows/build-site.yml
+    with:
+      artifact: github-pages-game-data
+      # The newest site code: anything pushed while the export ran has been deployed already.
+      ref: master
+
+  redeploy:
+    needs: rebuild
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-game-data

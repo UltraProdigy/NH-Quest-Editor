@@ -971,25 +971,32 @@ shards.forEach((s, i) => writeFileSync(join(outDir, 'index', `${i}.json`), JSON.
 console.time('icons');
 const SHEET = 512;
 
-/** The smallest of 32/64/128 px that reproduces a 256 px render exactly when point-sampled. */
+/**
+ * The smallest of 32/64/128 px that reproduces a 256 px render exactly when point-sampled. Tried
+ * from the largest down: an image that doesn't survive halving can't survive quartering either, so
+ * most 3D renders are settled by one scan.
+ */
 function smallestLossless(px: Buffer, S: number): number {
-  for (const n of [32, 64, 128]) {
+  // One comparison per pixel instead of four (a copy when the buffer isn't 4-byte aligned).
+  const p = px.byteOffset % 4 ? new Uint32Array(Uint8Array.from(px).buffer, 0, S * S) : new Uint32Array(px.buffer, px.byteOffset, S * S);
+  let best = S;
+  for (const n of [128, 64, 32]) {
     if (n >= S || S % n) continue;
     const k = S / n;
     let ok = true;
     outer: for (let y = 0; y < S; y++) {
-      const sy = y - (y % k);
+      const row = y * S, srcRow = (y - (y % k)) * S;
       for (let x = 0; x < S; x++) {
-        const a = (y * S + x) * 4, b = (sy * S + x - (x % k)) * 4;
-        if (px[a] !== px[b] || px[a + 1] !== px[b + 1] || px[a + 2] !== px[b + 2] || px[a + 3] !== px[b + 3]) {
+        if (p[row + x] !== p[srcRow + x - (x % k)]) {
           ok = false;
           break outer;
         }
       }
     }
-    if (ok) return n;
+    if (!ok) break;
+    best = n;
   }
-  return S;
+  return best;
 }
 
 /** An icon file decoded and shrunk, or null when it is missing or empty. */
@@ -1045,6 +1052,34 @@ async function writeSheet(no: number, size: number, cells: Buffer[]) {
 
 // NEI's item list goes first, in its order, so a page of the item panel needs few sheets.
 const iconOrder = [...new Set([...listKeys.map((k) => indexOf.get(k)!), ...keys.keys()])];
+
+// Icons are decoded a window ahead, in parallel (sharp works on libuv's thread pool), and taken in
+// the order above, so the sheets come out exactly as with one decode at a time.
+const iconFiles: string[] = [];
+{
+  const seen = new Set<string>();
+  for (const i of iconOrder) {
+    const file = items.get(keys[i])!.icon;
+    if (file && !seen.has(file)) {
+      seen.add(file);
+      iconFiles.push(file);
+    }
+  }
+}
+const DECODE_AHEAD = 64;
+const decoding = new Map<string, Promise<{ size: number; data: Buffer } | null>>();
+let decodeStarted = 0, decodeTaken = 0;
+function nextIcon(file: string) {
+  while (decodeStarted < iconFiles.length && decodeStarted - decodeTaken < DECODE_AHEAD) {
+    const f = iconFiles[decodeStarted++];
+    decoding.set(f, readIcon(f));
+  }
+  const img = decoding.get(file)!;
+  decoding.delete(file);
+  decodeTaken++;
+  return img;
+}
+
 for (const i of iconOrder) {
   const file = items.get(keys[i])!.icon;
   if (!file) {
@@ -1053,7 +1088,7 @@ for (const i of iconOrder) {
   }
   let cell = cellOfFile.get(file);
   if (cell === undefined) {
-    const img = await readIcon(file);
+    const img = await nextIcon(file);
     if (!img) {
       cellOfFile.set(file, -1);
       missingIcons++;
