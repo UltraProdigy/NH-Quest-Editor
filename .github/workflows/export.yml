@@ -134,7 +134,19 @@ jobs:
         working-directory: ${{ env.ORACLE_DIR }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace build -x test 2>&1 | tee "$WORK/out/build.log"
+          # Gradle skips a repository for the rest of the run after one failed request (a timeout,
+          # a 5xx or a 429), and every later lookup there reads "Could not find". Retry a couple of
+          # times, refreshing what an earlier attempt may have cached as missing.
+          for attempt in 1 2 3; do
+            refresh=()
+            if [ "$attempt" -gt 1 ]; then refresh=(--refresh-dependencies); fi
+            if ./gradlew --no-daemon --stacktrace "${refresh[@]}" build -x test 2>&1 | tee -a "$WORK/out/build.log"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            echo "::warning title=Exporter build retried::Attempt $attempt failed, retrying in 60 s."
+            sleep 60
+          done
           ls -la build/libs
           jar=$(find build/libs -maxdepth 1 -type f -name '*.jar' \
             ! -name '*-sources.jar' ! -name '*-dev.jar' ! -name '*-preshadow.jar' ! -name '*-dev-preshadow.jar' | head -n1)
@@ -369,7 +381,8 @@ jobs:
           mkdir -p "$out"
           log="$out/client.log"
           if [ -f "$out/build.log" ] && ! grep -q 'BUILD SUCCESSFUL' "$out/build.log"; then
-            grep -E 'error:|FAILURE|What went wrong|^> |\.java:[0-9]+' "$out/build.log" | head -n 120 > "$WORK/diag-build.txt" || true
+            grep -E 'error:|FAILURE|What went wrong|^> |\.java:[0-9]+|Could not (GET|HEAD|resolve)|status code|disabled for the rest|Searched in|^ *- https?://' \
+              "$out/build.log" | awk '!seen[$0]++' | head -n 160 > "$WORK/diag-build.txt" || true
             tail -n 60 "$out/build.log" >> "$WORK/diag-build.txt"
             annotate "build errors" "$WORK/diag-build.txt" 20000
           fi
