@@ -59,6 +59,8 @@ export class EditDocument {
   version = 0;
   private listeners = new Set<() => void>();
   private cache: { version: number; files?: Map<string, string>; book?: QuestbookData } = { version: -1 };
+  /** The base data as BetterQuesting would save it, before any edit. */
+  private pristine: Map<string, string> | null = null;
 
   readonly bundle: RawBundle;
 
@@ -267,10 +269,23 @@ export class EditDocument {
     this.changed();
   }
 
-  /** The DefaultQuests files as BetterQuesting would save them now (repo spellings kept). */
+  /**
+   * The DefaultQuests files as BetterQuesting would save them now (repo spellings kept). A file
+   * the edits leave as it was keeps the repo's text, even where someone edited it by hand and it
+   * is not quite what BetterQuesting writes, so exports only hold the files that really changed.
+   */
   files(): Map<string, string> {
     if (this.cache.version !== this.version) this.cache = { version: this.version };
-    return (this.cache.files ??= matchBaseCase(saveDb(this.db), this.base.keys()));
+    if (!this.cache.files) {
+      this.pristine ??= matchBaseCase(saveDb(loadDb(this.base)), this.base.keys());
+      const out = matchBaseCase(saveDb(this.db), this.base.keys());
+      for (const [p, t] of out) {
+        const b = this.base.get(p);
+        if (b !== undefined && this.pristine.get(p) === t) out.set(p, b);
+      }
+      this.cache.files = out;
+    }
+    return this.cache.files;
   }
 
   /** Which files differ from the base data. */
