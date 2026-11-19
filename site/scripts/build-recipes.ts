@@ -19,6 +19,7 @@
 // - tooltips.json: the item list's tooltips, for the item panel's tooltips and NEI's search.
 // - pictures/<n>.png: what the generically captured handlers draw (backgrounds, foregrounds),
 //   cropped to what was drawn.
+// - mobs/<n>.png: MobsInfo's mobs, each at a few turns (see MobPreview in model.ts).
 //
 // See src/nei/model.ts for the shapes.
 
@@ -27,7 +28,7 @@ import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { parseJsonFile, type Json, type JsonPath } from './jsonStream.ts';
-import type { NeiItems, NeiHandler, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiRecipe, GtLayout } from '../src/nei/model.ts';
+import type { NeiItems, NeiHandler, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiRecipe, GtLayout, MobPreview } from '../src/nei/model.ts';
 import { standardLines } from '../src/nei/text.ts';
 import { INDEX_SHARDS, shardOf } from '../src/nei/model.ts';
 import { gtLookup, type GtLookupExport } from './gtLookup.ts';
@@ -135,6 +136,10 @@ interface GenericRecipeExport {
   bg?: number;
   fg?: number;
   for?: number[];
+  /** getRecipeHeight, when not the handler's height. */
+  h?: number;
+  /** MobsInfo: the mob's sheet (GenericExport.mobs). */
+  mob?: number;
 }
 interface GenericHandlerExport {
   index: number;
@@ -151,6 +156,8 @@ interface GenericExport {
   items?: Res[];
   images?: string[];
   handlers?: GenericHandlerExport[];
+  mobs?: string[];
+  mobPreview?: MobPreview;
 }
 
 // ---------------------------------------------------------------- items
@@ -241,6 +248,8 @@ type KRecipe =
       bg?: number;
       fg?: number;
       for?: string[];
+      rh?: number;
+      mob?: number;
     };
 
 interface KHandler {
@@ -487,6 +496,8 @@ function genericRecipe(r: GenericRecipeExport): KRecipe {
   if (r.bg !== undefined) out.bg = r.bg;
   if (r.fg !== undefined) out.fg = r.fg;
   if (r.for?.length) out.for = r.for.map((i) => genericKeys[i]).filter((k): k is string => !!k);
+  if (r.h) out.rh = r.h;
+  if (r.mob !== undefined && genericExport?.mobs?.[r.mob]) out.mob = r.mob;
   return out;
 }
 
@@ -683,9 +694,18 @@ function numberRecipe(r: KRecipe, amperage = 1): NeiRecipe {
       if (r.tx) g.tx = r.tx;
       if (r.bg !== undefined) g.bg = pictureNo(r.bg);
       if (r.fg !== undefined) g.fg = pictureNo(r.fg);
+      if (r.mob !== undefined) g.mob = mobNo(r.mob);
       return g;
     }
   }
+}
+
+/** Output numbers of the mob sheets, in order of first use. */
+const mobOut = new Map<number, number>();
+function mobNo(id: number): number {
+  let n = mobOut.get(id);
+  if (n === undefined) mobOut.set(id, (n = mobOut.size));
+  return n;
 }
 
 /** Output numbers of the captured pictures, in order of first use; written with the icons. */
@@ -789,6 +809,9 @@ allHandlers.forEach((h, hi) => {
   if (h.badges !== undefined) out.badges = h.badges;
   if (h.width) out.width = h.width;
   if (!h.multiple) out.multiple = false;
+  if (h.recipes.some((r) => r.t === 'generic' && r.rh && r.rh !== h.height)) {
+    out.heights = h.recipes.map((r) => (r.t === 'generic' && r.rh) || h.height);
+  }
   if (h.anim) out.anim = { period: h.anim.period, keys: h.anim.keys, pics: h.anim.pics.map((p) => (p >= 0 ? pictureNo(p) : -1)) };
   if (h.kind === 'gt') {
     const max: [number, number, number, number] = [0, 0, 0, 0];
@@ -837,9 +860,28 @@ if (pictureOut.size) {
   console.log(`pictures: ${pictureOut.size} (${missing} missing)`);
 }
 
+// MobsInfo's mob sheets, as the exporter rendered them.
+if (mobOut.size) {
+  mkdirSync(join(outDir, 'mobs'), { recursive: true });
+  const files = genericExport?.mobs ?? [];
+  let missing = 0;
+  for (const [id, no] of mobOut) {
+    const file = join(picturesDir, files[id] ?? '');
+    if (!files[id] || !existsSync(file)) {
+      missing++;
+      continue;
+    }
+    await sharp(file).png({ compressionLevel: 9 }).toFile(join(outDir, 'mobs', `${no}.png`));
+  }
+  console.log(`mobs: ${mobOut.size} (${missing} missing)`);
+}
+const mob = mobOut.size ? genericExport?.mobPreview : undefined;
+
 writeFileSync(
   join(outDir, 'handlers.json'),
-  JSON.stringify({ format: 1, handlers: handlersOut, ...(fuels.length ? { fuels } : {}), ...(pics.length ? { pics } : {}) }),
+  JSON.stringify({
+    format: 1, handlers: handlersOut, ...(fuels.length ? { fuels } : {}), ...(pics.length ? { pics } : {}), ...(mob ? { mob } : {}),
+  }),
 );
 
 // NEI's item list and what the item panel and its search need beyond items.json: tooltips (the

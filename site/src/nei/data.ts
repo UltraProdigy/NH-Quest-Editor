@@ -6,7 +6,7 @@ import { type Gfx, keys as heldKeys } from '../gui/core.ts';
 import { animating, invalidate } from '../gui/frame.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import { drawItemKey, itemInfo, preloadIcons, itemFallback } from '../gui/items.ts';
-import type { NeiItems, NeiHandlers, NeiHandler, NeiRecipe, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiList, NeiTooltips } from './model.ts';
+import type { NeiItems, NeiHandlers, NeiHandler, NeiRecipe, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiList, NeiTooltips, MobPreview } from './model.ts';
 import { shardOf } from './model.ts';
 
 const DIR = 'data/nei/';
@@ -15,6 +15,7 @@ let items: NeiItems | null = null;
 let handlers: NeiHandler[] = [];
 let fuels: number[] = [];
 let pics: [number, number, number, number][] = [];
+let mobPreview: MobPreview | null = null;
 let keyIndex = new Map<string, number>();
 /** Ore names each item belongs to (only names some recipe uses). */
 let oreOf = new Map<number, number[]>();
@@ -32,6 +33,7 @@ export function loadNei(): Promise<boolean> {
       handlers = hs.handlers;
       fuels = hs.fuels ?? [];
       pics = hs.pics ?? [];
+      mobPreview = hs.mob ?? null;
       keyIndex = new Map(it.keys.map((k, i) => [k, i]));
       itemFallback.draw = drawNeiKey;
       itemFallback.name = (key) => {
@@ -74,6 +76,27 @@ export function picture(gfx: Gfx, n: number, x: number, y: number) {
   if (!p || !p[2]) return;
   const img = image(siteUrl(`${DIR}pictures/${n}.png`));
   if (img) gfx.image(img, 0, 0, p[2], p[3], x + p[0], y + p[1], p[2], p[3]);
+}
+
+/**
+ * MobsInfo's mob in its box (MobUtils.renderMobPreview), turned towards the mouse (relative to the
+ * recipe; null looks straight ahead) with the sheet's nearest turn.
+ */
+export function drawMob(gfx: Gfx, n: number, x: number, y: number, mouse: [number, number] | null) {
+  const m = mobPreview;
+  if (!m) return;
+  const img = image(siteUrl(`${DIR}mobs/${n}.png`));
+  if (!img) return;
+  const nearest = (list: number[], v: number) => {
+    let best = 0;
+    for (let i = 1; i < list.length; i++) if (Math.abs(list[i] - v) < Math.abs(list[best] - v)) best = i;
+    return best;
+  };
+  const col = mouse ? nearest(m.yaws, Math.atan((m.anchor[0] - mouse[0]) / 40)) : nearest(m.yaws, 0);
+  const row = mouse ? nearest(m.pitches, Math.atan((m.anchor[1] - 25 - mouse[1]) / 40)) : nearest(m.pitches, 0);
+  const [bx, by, bw, bh] = m.box;
+  const fw = bw * m.scale, fh = bh * m.scale;
+  gfx.icon(img, col * fw, row * fh, fw, fh, x + bx, y + by, bw, bh);
 }
 
 // ---------------------------------------------------------------- NEI's item list

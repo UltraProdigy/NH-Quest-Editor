@@ -6,7 +6,7 @@ import { type Gfx } from '../gui/core.ts';
 import { texture } from '../gui/assets.ts';
 import { animating } from '../gui/frame.ts';
 import type { NeiHandler, NeiRecipe, Slot } from './model.ts';
-import { itemIndexOf, fuelList as exportedFuels, cycleTime, picture, slotItem, slotAmount, itemKeyAt, drawNeiItem } from './data.ts';
+import { itemIndexOf, fuelList as exportedFuels, cycleTime, picture, drawMob, slotItem, slotAmount, itemKeyAt, drawNeiItem } from './data.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import { splitString } from '../gui/text.ts';
 import { type Rect, inside } from './draw.ts';
@@ -119,8 +119,9 @@ function drawGenericLayer(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: n
   }
 }
 
-/** Height of one recipe (IRecipeHandler.getRecipeHeight), without the handler's yShift. */
-export function recipeHeight(h: NeiHandler, r: NeiRecipe | null): number {
+/** Height of recipe `index` (IRecipeHandler.getRecipeHeight), without the handler's yShift. */
+export function recipeHeight(h: NeiHandler, r: NeiRecipe | null, index?: number): number {
+  if (index !== undefined && h.heights?.[index]) return h.heights[index];
   if (h.kind === 'gt' && r) return gtRecipeHeight(h, r);
   return h.height;
 }
@@ -141,10 +142,14 @@ function progressBar(
   else gfx.image(img, tx, ty + h - v, w, v, x, y + h - v, w, v);
 }
 
-/** drawBackground: the handler's texture behind the stacks. */
-export function drawRecipeBackground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: number, now: number) {
+/** drawBackground: the handler's texture behind the stacks. mouse: relative to the recipe, null for none. */
+export function drawRecipeBackground(gfx: Gfx, h: NeiHandler, r: NeiRecipe, x: number, y: number, now: number, mouse: [number, number] | null = null) {
   if (h.kind === 'gt') return drawGtBackground(gfx, h, r, x, y, now);
-  if (h.kind === 'generic') return drawGenericLayer(gfx, h, r, x, y, 0, now);
+  if (h.kind === 'generic') {
+    drawGenericLayer(gfx, h, r, x, y, 0, now);
+    if (r.mob !== undefined) drawMob(gfx, r.mob, x, y, mouse);
+    return;
+  }
   if (h.kind === 'quest') {
     // QuestRecipeHandler.drawBackground: the two 4 x 4 grids and the arrow.
     const bg = texture('bq_standard:textures/gui/nei.png');
@@ -207,7 +212,7 @@ export function formatChance(c: number) {
  * highlighted (pass -1, -1 for none).
  */
 export function drawRecipeWidget(gfx: Gfx, h: NeiHandler, rec: NeiRecipe, ox: number, oy: number, now: number, mx = -1, my = -1) {
-  drawRecipeBackground(gfx, h, rec, ox, oy, now);
+  drawRecipeBackground(gfx, h, rec, ox, oy, now, mx < 0 && my < 0 ? null : [mx - ox, my - oy]);
   for (const ps of recipeSlots(h, rec, now)) {
     const item = slotItem(ps.slot, now);
     const o = typeof ps.slot === 'object' ? ps.slot : null;

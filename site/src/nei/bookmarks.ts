@@ -1478,7 +1478,7 @@ function recipeTip(rid: string): TipLine | null {
   if (!rec) return null;
   const h = ref.h;
   const ww = Math.max(166, h.width ?? 166);
-  const wh = recipeHeight(h, null) + h.yShift;
+  const wh = recipeHeight(h, null, ref.recipe) + h.yShift;
   const BG = 5, T = 4;
   const width = ww + BG * 2, height = wh + BG * 2 + 12;
   return {

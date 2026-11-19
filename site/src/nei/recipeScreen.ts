@@ -134,7 +134,7 @@ export class RecipeScreen extends Screen {
     // HandlerInfo.multipleWidgetsAllowed: some handlers show one recipe per page.
     const one = h.multiple === false;
     for (const r of this.recipes()) {
-      const rh = recipeHeight(h, null) + h.yShift;
+      const rh = recipeHeight(h, null, r) + h.yShift;
       if (page.length && (one || used + rh > avail)) {
         this.pages.push(page);
         page = [];
@@ -260,7 +260,7 @@ export class RecipeScreen extends Screen {
     const cw = Math.max(c.w, h.width ?? 166);
     let y = c.y;
     for (const r of this.pages[this.page] ?? []) {
-      const rh = recipeHeight(h, null) + h.yShift;
+      const rh = recipeHeight(h, null, r) + h.yShift;
       out.push({ recipe: r, x: c.x + Math.trunc((cw - w) / 2), y, h: rh });
       y += rh;
     }

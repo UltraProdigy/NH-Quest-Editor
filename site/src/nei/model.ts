@@ -53,6 +53,8 @@ export interface NeiRecipe {
   /** Generic handlers: pictures (NeiHandlers.pics) drawn under and over the stacks. */
   bg?: number;
   fg?: number;
+  /** MobsInfo's tabs: the mob's sheet (mobs/<n>.png, laid out as NeiHandlers.mob says). */
+  mob?: number;
   /** BetterQuesting's tab: the quest's id and name. */
   q?: string;
   qn?: string;
@@ -181,6 +183,8 @@ export interface NeiHandler {
   width?: number;
   /** HandlerInfo.multipleWidgetsAllowed: false when NEI shows one recipe per page. */
   multiple?: false;
+  /** Each recipe's height (getRecipeHeight), for handlers whose recipes are not all `height` tall. */
+  heights?: number[];
   /**
    * Generic handlers whose foreground moves with the tick counter (progress bars): the period in
    * ticks, the ticks within it where the picture changes, and the picture (pics, -1 for none) of the
@@ -196,6 +200,21 @@ export interface NeiHandlers {
   fuels?: number[];
   /** Generic handlers' pictures (pictures/<n>.png): x, y relative to the recipe, width, height. */
   pics?: [number, number, number, number][];
+  mob?: MobPreview;
+}
+
+/**
+ * MobsInfo's mob preview: the mob rendered at `scale` pixels per GUI unit, filling `box` (x, y,
+ * width, height relative to the recipe), once for each turn. A sheet holds a row per pitch and a
+ * column per yaw, as atan(look / 40) where look is the anchor (less 25 for pitch) minus the mouse,
+ * which is what GuiInventory.func_147046_a turns the mob by.
+ */
+export interface MobPreview {
+  box: [number, number, number, number];
+  anchor: [number, number];
+  scale: number;
+  yaws: number[];
+  pitches: number[];
 }
 
 /** NEI's item list (list.json): item indexes in NEI's order, and the collapsible groups. */

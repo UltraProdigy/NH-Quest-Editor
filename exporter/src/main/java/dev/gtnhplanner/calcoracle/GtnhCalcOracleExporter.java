@@ -436,6 +436,10 @@ public final class GtnhCalcOracleExporter {
             Map<String, Object> generic = new LinkedHashMap<String, Object>();
             generic.put("items", capture.items);
             generic.put("images", capture.images);
+            if (!capture.mobs.isEmpty()) {
+                generic.put("mobs", capture.mobs);
+                generic.put("mobPreview", capture.mobPreview());
+            }
             generic.put("handlers", handlers);
             domain.put("generic", generic);
             adapters.add(

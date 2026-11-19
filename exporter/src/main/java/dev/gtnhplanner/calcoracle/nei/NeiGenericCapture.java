@@ -9,10 +9,12 @@ import static dev.gtnhplanner.calcoracle.nei.NeiHandlerExporter.staticField;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -23,9 +25,13 @@ import java.util.Set;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.inventory.GuiInventory;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.RenderHelper;
+import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.shader.Framebuffer;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.boss.BossStatus;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
@@ -57,7 +63,17 @@ import dev.gtnhplanner.calcoracle.icons.PngWriter;
  * the part of the picture that changes is cut out of every recipe's foreground, and pictures of that
  * part at each tick where it changes (within one period) are kept for the site to cycle through.
  *
- * Everything that draws runs on the client thread (ClientThread). Reflection only.
+ * MobsInfo's tabs (Mob Info, Villager Trades) draw the mob in a box that follows the mouse. The
+ * mob is rendered separately at a higher resolution, at a few turns of its body and head, into one
+ * sheet per mob ("mob" on the recipe, "mobs" and mobPreview()), and left out of the background.
+ *
+ * NEI Custom Diagram's groups are not TemplateRecipeHandlers and draw their items themselves; the
+ * ones named in DIAGRAM_GROUPS (World-Gen Loot: the dungeon and structure chest loot tables) are
+ * captured from their diagrams instead: slots with their components and tooltips, the layout as
+ * the background and the labels as the foreground (captureDiagrams).
+ *
+ * Everything that draws runs on the client thread (ClientThread). Reflection only, but for the
+ * vanilla classes the mob render uses.
  */
 public final class NeiGenericCapture {
 
@@ -75,6 +91,36 @@ public final class NeiGenericCapture {
         "blockrenderer6343.integration.gregtech.GTNEIMultiblockHandler",
         "hellfirepvp.beebetteratbees.client.gui.BBABGuiRecipeTreeHandler"));
 
+    /** NEI Custom Diagram groups captured from their diagrams; gtnh.oracle.neiDiagramGroups adds more (comma separated ids). */
+    private static final Set<String> DIAGRAM_GROUPS = new HashSet<String>(Arrays.asList(
+        "neicustomdiagram.diagramgroup.forge.worldgenloot"));
+    static {
+        for (String id : System.getProperty("gtnh.oracle.neiDiagramGroups", "").split(",")) {
+            if (id.trim().length() > 0) DIAGRAM_GROUPS.add(id.trim());
+        }
+    }
+    private static final String DIAGRAM_GROUP = "com.github.dcysteine.neicustomdiagram.api.diagram.DiagramGroup";
+    private static final String COMPONENT_GROUP = "com.github.dcysteine.neicustomdiagram.api.diagram.interactable.InteractiveComponentGroup";
+
+    /** MobsInfo's preview box and anchor (MobUtils.PREVIEW_*), read from the mod when it has them. */
+    private static final String MOB_UTILS = "com.kuba6000.mobsinfo.api.utils.MobUtils";
+    private final int boxX = staticInt(MOB_UTILS, "PREVIEW_BOX_X", 8);
+    private final int boxY = staticInt(MOB_UTILS, "PREVIEW_BOX_Y", 8);
+    private final int boxW = staticInt(MOB_UTILS, "PREVIEW_BOX_WIDTH", 46);
+    private final int boxH = staticInt(MOB_UTILS, "PREVIEW_BOX_HEIGHT", 52);
+    private final int anchorX = staticInt(MOB_UTILS, "PREVIEW_ANCHOR_X", 31);
+    private final int anchorY = staticInt(MOB_UTILS, "PREVIEW_ANCHOR_Y", 50);
+    /** Pixels per GUI unit of the mob sheets. */
+    private final int mobScale = Integer.getInteger("gtnh.oracle.mobPreviewScale", 3).intValue();
+    /**
+     * The turns the sheets hold: atan(lookX / 40) across, atan(lookY / 40) down, where look is what
+     * GuiInventory.func_147046_a takes (the mob's anchor minus the mouse).
+     */
+    private static final float[] MOB_YAWS = { -1.2F, -0.8F, -0.4F, 0.0F, 0.4F, 0.8F, 1.2F };
+    private static final float[] MOB_PITCHES = { -0.8F, 0.0F, 0.8F };
+    /** Size of the canvas the mob is measured on, at MobsInfo's measuring scale. */
+    private static final int MOB_MEASURE = 256;
+
     private final NeiHandlerExporter.Resources resources;
     private final File imageDir;
     public final List<String> warnings = new ArrayList<String>();
@@ -85,10 +131,18 @@ public final class NeiGenericCapture {
     /** Picture files (in imageDir), once per distinct picture. */
     public final List<Object> images = new ArrayList<Object>();
     private final Map<String, Integer> imageIds = new HashMap<String, Integer>();
+    /** Mob sheets (in imageDir), once per distinct sheet. */
+    public final List<Object> mobs = new ArrayList<Object>();
+    private final Map<String, Integer> mobIds = new HashMap<String, Integer>();
+    private Canvas mobMeasure;
+    private Canvas mobFrame;
+    /** handleItemTooltip of each handler class, where it overrides TemplateRecipeHandler's. */
+    private final Map<Class<?>, Method> tooltipMethods = new HashMap<Class<?>, Method>();
     /** Stands in for the font renderers while a handler draws (made once: it reads the glyph sizes). */
     private RecordingFontRenderer recorder;
     /** The handler being captured: its recipe width, and its foreground animation once probed. */
     private int handlerWidth = 166;
+    private int handlerHeight = 65;
     private boolean animProbed;
     private Map<String, Object> anim;
     /** The part of the foreground that moves, in canvas pixels (rows bottom-up): x0, y0, x1, y1 inclusive. */
@@ -110,12 +164,24 @@ public final class NeiGenericCapture {
         int index = 0;
         for (Object handler : iterable(staticField("codechicken.nei.recipe.GuiCraftingRecipe", "craftinghandlers"))) {
             String name = handler.getClass().getName();
-            if (template != null && template.isInstance(handler) && !SKIPPED.contains(name) && !isPorted(handler)) {
+            boolean generic = template != null && template.isInstance(handler) && !SKIPPED.contains(name) && !isPorted(handler);
+            if (generic || isCapturedDiagramGroup(handler)) {
                 out.add(new Object[] { Integer.valueOf(index), handler });
             }
             index++;
         }
         return out;
+    }
+
+    private static boolean isCapturedDiagramGroup(Object handler) {
+        return isA(handler, DIAGRAM_GROUP) && DIAGRAM_GROUPS.contains(String.valueOf(call(handler, "getHandlerId")));
+    }
+
+    private static boolean isA(Object o, String className) {
+        for (Class<?> c = o == null ? null : o.getClass(); c != null; c = c.getSuperclass()) {
+            if (className.equals(c.getName())) return true;
+        }
+        return false;
     }
 
     /** Handlers the site draws itself: crafting, smelting and GregTech's. */
@@ -148,6 +214,10 @@ public final class NeiGenericCapture {
         out.put("size", Arrays.asList(Integer.valueOf(width), Integer.valueOf(height)));
         out.put("margin", Integer.valueOf(MARGIN));
         handlerWidth = width;
+        handlerHeight = height;
+        if (isA(handler, DIAGRAM_GROUP)) {
+            return captureDiagrams(handler, out, width, height, deadline);
+        }
         animProbed = false;
         anim = null;
         animBox = null;
@@ -221,6 +291,7 @@ public final class NeiGenericCapture {
             warn(className + ": " + t);
         } finally {
             canvas.delete();
+            deleteMobCanvases();
         }
         if (failures[0] > 0) {
             warn(className + ": " + failures[0] + " recipes failed to capture");
@@ -259,9 +330,9 @@ public final class NeiGenericCapture {
         List<Object> stacks = new ArrayList<Object>();
         List<Object> custom = new ArrayList<Object>();
         try {
-            addStacks(stacks, custom, call(h, "getIngredientStacks", Integer.valueOf(r)), 0);
-            addStacks(stacks, custom, call(h, "getResultStack", Integer.valueOf(r)), 1);
-            addStacks(stacks, custom, call(h, "getOtherStacks", Integer.valueOf(r)), 2);
+            addStacks(stacks, custom, call(h, "getIngredientStacks", Integer.valueOf(r)), 0, h, r);
+            addStacks(stacks, custom, call(h, "getResultStack", Integer.valueOf(r)), 1, h, r);
+            addStacks(stacks, custom, call(h, "getOtherStacks", Integer.valueOf(r)), 2, h, r);
         } catch (Throwable t) {
             failures[0]++;
             return null;
@@ -272,6 +343,33 @@ public final class NeiGenericCapture {
             warnOnce("tanks: " + t);
         }
         out.put("s", stacks);
+        int rh = number(call(h, "getRecipeHeight", Integer.valueOf(r)), -1);
+        if (rh > 0 && rh != handlerHeight) {
+            out.put("h", Integer.valueOf(rh));
+        }
+
+        // MobsInfo's mob: rendered into its own sheet, and kept out of the background picture.
+        Object cached = cachedRecipe(h, r);
+        Field mobField = mobField(h, cached);
+        Object mob = null;
+        if (mobField != null) {
+            try {
+                mob = mobField.get(cached);
+                mobField.set(cached, mob); // fails where the field cannot be changed: leave the mob in the picture
+                if (!(mob instanceof EntityLivingBase) || Boolean.FALSE.equals(call(cached, "isUnlocked"))) {
+                    mobField = null;
+                } else {
+                    int sheet = mobPreview((EntityLivingBase) mob);
+                    if (sheet >= 0) out.put("mob", Integer.valueOf(sheet));
+                    else mobField = null;
+                }
+            } catch (Throwable t) {
+                warnOnce("mob preview: " + t);
+                mobField = null;
+            }
+        }
+        final Field hiddenMob = mobField;
+        final Object shownMob = mob;
 
         Minecraft mc = Minecraft.getMinecraft();
         FontRenderer realFont = mc.fontRenderer;
@@ -305,7 +403,21 @@ public final class NeiGenericCapture {
             }
             setTicks(h, ticks, 0);
             int bg = canvas.draw(() -> {
-                call(h, "drawBackground", Integer.valueOf(r));
+                if (hiddenMob != null) {
+                    // The handler's own preview catches the missing mob and draws nothing.
+                    try {
+                        hiddenMob.set(cached, null);
+                        call(h, "drawBackground", Integer.valueOf(r));
+                    } catch (Throwable ignored) {
+                    } finally {
+                        try {
+                            hiddenMob.set(cached, shownMob);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                } else {
+                    call(h, "drawBackground", Integer.valueOf(r));
+                }
                 if (!custom.isEmpty()) {
                     RenderHelper.enableGUIStandardItemLighting();
                     for (Object p : custom) {
@@ -356,7 +468,7 @@ public final class NeiGenericCapture {
      * PositionedStack subclasses that draw themselves (tanks and the like), which are pictured in
      * the background layer instead of drawn as items.
      */
-    private void addStacks(List<Object> out, List<Object> custom, Object value, int role) {
+    private void addStacks(List<Object> out, List<Object> custom, Object value, int role, Object h, int r) {
         for (Object p : iterable(value)) {
             if (p == null) {
                 continue;
@@ -393,10 +505,13 @@ public final class NeiGenericCapture {
             if (chance > 0 && chance < 10000) {
                 s.put("c", Integer.valueOf(chance));
             }
+            List<Object> lines = new ArrayList<Object>();
             Object tip = call(p, "getTooltip");
-            if (tip instanceof List && !((List<?>) tip).isEmpty()) {
-                List<Object> lines = new ArrayList<Object>();
+            if (tip instanceof List) {
                 for (Object l : (List<?>) tip) lines.add(String.valueOf(l));
+            }
+            lines.addAll(handlerTooltip(h, r, current));
+            if (!lines.isEmpty()) {
                 s.put("tip", lines);
             }
             if (!"codechicken.nei.PositionedStack".equals(p.getClass().getName())) {
@@ -686,19 +801,424 @@ public final class NeiGenericCapture {
             + (stack.stackTagCompound == null ? "" : "#" + stack.stackTagCompound);
     }
 
+
+    // ------------------------------------------------------------------------------------- tooltips
+
+    /**
+     * The lines the handler adds to a stack's tooltip (handleItemTooltip: MobsInfo's drop chances,
+     * loot bag weights and the like), for handlers that override TemplateRecipeHandler's. Called
+     * without a GuiRecipe; handlers that need one give nothing.
+     */
+    private List<String> handlerTooltip(Object h, int r, Object stack) {
+        if (h == null || !(stack instanceof ItemStack)) {
+            return Collections.emptyList();
+        }
+        Method m = tooltipMethod(h.getClass());
+        if (m == null) {
+            return Collections.emptyList();
+        }
+        List<String> tip = new ArrayList<String>();
+        try {
+            Object res = m.invoke(h, new Object[] { null, stack, tip, Integer.valueOf(r) });
+            List<String> out = new ArrayList<String>();
+            for (Object l : iterable(res instanceof List ? res : tip)) {
+                if (l != null) out.add(String.valueOf(l));
+            }
+            return out;
+        } catch (Throwable t) {
+            return Collections.emptyList();
+        }
+    }
+
+    private Method tooltipMethod(Class<?> type) {
+        if (tooltipMethods.containsKey(type)) {
+            return tooltipMethods.get(type);
+        }
+        Method found = null;
+        search:
+        for (Class<?> c = type; c != null; c = c.getSuperclass()) {
+            String name = c.getName();
+            if ("codechicken.nei.recipe.TemplateRecipeHandler".equals(name) || "java.lang.Object".equals(name)) {
+                break;
+            }
+            for (Method m : c.getDeclaredMethods()) {
+                if ("handleItemTooltip".equals(m.getName()) && m.getParameterTypes().length == 4 && !Modifier.isStatic(m.getModifiers())) {
+                    m.setAccessible(true);
+                    found = m;
+                    break search;
+                }
+            }
+        }
+        tooltipMethods.put(type, found);
+        return found;
+    }
+
+    // ------------------------------------------------------------------------------------- mobs
+
+    /** The handler's CachedRecipe at r (TemplateRecipeHandler.arecipes). */
+    private static Object cachedRecipe(Object h, int r) {
+        Object list = field(h, "arecipes");
+        return list instanceof List && r < ((List<?>) list).size() ? ((List<?>) list).get(r) : null;
+    }
+
+    /** The field holding the mob a MobsInfo recipe shows (MobCachedRecipe.mob, VillagerCachedRecipe.displayMob). */
+    private static Field mobField(Object h, Object cached) {
+        if (cached == null || !h.getClass().getName().startsWith("com.kuba6000.mobsinfo.")) {
+            return null;
+        }
+        for (Class<?> c = cached.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (!Modifier.isStatic(f.getModifiers()) && EntityLivingBase.class.isAssignableFrom(f.getType())) {
+                    try {
+                        f.setAccessible(true);
+                        return f;
+                    } catch (Throwable t) {
+                        return null;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** How the site reads the mob sheets: the box they fill, their pixels per GUI unit and their turns. */
+    public Map<String, Object> mobPreview() {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("box", Arrays.asList(Integer.valueOf(boxX), Integer.valueOf(boxY), Integer.valueOf(boxW), Integer.valueOf(boxH)));
+        out.put("anchor", Arrays.asList(Integer.valueOf(anchorX), Integer.valueOf(anchorY)));
+        out.put("scale", Integer.valueOf(mobScale));
+        List<Object> yaws = new ArrayList<Object>();
+        for (float f : MOB_YAWS) yaws.add(Float.valueOf(f));
+        List<Object> pitches = new ArrayList<Object>();
+        for (float f : MOB_PITCHES) pitches.add(Float.valueOf(f));
+        out.put("yaws", yaws);
+        out.put("pitches", pitches);
+        return out;
+    }
+
+    /**
+     * Renders the mob as MobUtils.renderMobPreview places it (measured at scale 20 with no turn,
+     * scaled to fit 38 x 40, its feet at y = 54, its anchor at x = 31), once for each turn of the
+     * sheet, and stores the sheet. Returns its number, or -1 when nothing was drawn.
+     */
+    private int mobPreview(final EntityLivingBase mob) throws Exception {
+        if (mobMeasure == null) {
+            mobMeasure = new Canvas(MOB_MEASURE, MOB_MEASURE, 1, 0, 0);
+            mobFrame = new Canvas(boxW, boxH, mobScale, -boxX, -boxY);
+        }
+        final int cx = MOB_MEASURE / 2, cy = MOB_MEASURE * 3 / 4;
+        int[] b = null;
+        int measured = 20;
+        for (final int s : new int[] { 20, 5, 1 }) {
+            b = bounds(mobMeasure.render(() -> drawMob(mob, cx, cy, s, 0.0F, 0.0F)), MOB_MEASURE, MOB_MEASURE);
+            if (b == null) {
+                return -1;
+            }
+            measured = s;
+            if (b[0] > 0 && b[1] > 0 && b[2] < MOB_MEASURE - 1 && b[3] < MOB_MEASURE - 1) {
+                break;
+            }
+        }
+        float k20 = 20.0F / measured;
+        float width = (b[2] + 1 - b[0]) * k20, height = (b[3] + 1 - b[1]) * k20;
+        float bottom = (b[3] + 1 - cy) * k20;
+        float fit = Math.min(40.0F / height, 38.0F / width);
+        final int scale = Math.max(1, Math.round(20.0F * fit));
+        final int y = (int) (54.0F - bottom * scale / 20.0F);
+        final int pw = mobFrame.width, ph = mobFrame.height;
+        int cols = MOB_YAWS.length, rows = MOB_PITCHES.length;
+        int[] sheet = new int[pw * cols * ph * rows];
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < cols; col++) {
+                final float lookX = (float) (40.0 * Math.tan(MOB_YAWS[col]));
+                final float lookY = (float) (40.0 * Math.tan(MOB_PITCHES[row]));
+                byte[] frame = mobFrame.render(() -> drawMob(mob, anchorX, y, scale, lookX, lookY));
+                int[] argb = IconPixels.argbFromRgba(ByteBuffer.wrap(frame), pw, ph);
+                for (int line = 0; line < ph; line++) {
+                    System.arraycopy(argb, line * pw, sheet, (row * ph + line) * pw * cols + col * pw, pw);
+                }
+            }
+        }
+        if (!IconPixels.anyVisible(sheet)) {
+            return -1;
+        }
+        return storeMob(sheet, pw * cols, ph * rows);
+    }
+
+    /** GuiInventory.func_147046_a, as MobsInfo calls it: at the player's position, boss bar left as it was. */
+    private static void drawMob(EntityLivingBase mob, int x, int y, int scale, float lookX, float lookY) {
+        Minecraft mc = Minecraft.getMinecraft();
+        float healthScale = BossStatus.healthScale;
+        int statusBarTime = BossStatus.statusBarTime;
+        String bossName = BossStatus.bossName;
+        boolean hasColorModifier = BossStatus.hasColorModifier;
+        int depth = GL11.glGetInteger(GL11.GL_MODELVIEW_STACK_DEPTH);
+        GL11.glPushMatrix();
+        try {
+            if (mc.thePlayer != null) {
+                mob.setPosition(mc.thePlayer.posX, mc.thePlayer.posY, mc.thePlayer.posZ);
+                mob.lastTickPosX = mob.posX;
+                mob.lastTickPosY = mob.posY;
+                mob.lastTickPosZ = mob.posZ;
+            }
+            GL11.glEnable(GL11.GL_DEPTH_TEST);
+            GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+            OpenGlHelper.setActiveTexture(OpenGlHelper.lightmapTexUnit);
+            GL11.glDisable(GL11.GL_TEXTURE_2D);
+            OpenGlHelper.setActiveTexture(OpenGlHelper.defaultTexUnit);
+            GuiInventory.func_147046_a(x, y, scale, lookX, lookY, mob);
+        } catch (Throwable t) {
+            try {
+                Tessellator.instance.draw();
+            } catch (Throwable ignored) {
+            }
+        } finally {
+            BossStatus.healthScale = healthScale;
+            BossStatus.statusBarTime = statusBarTime;
+            BossStatus.bossName = bossName;
+            BossStatus.hasColorModifier = hasColorModifier;
+            GL11.glMatrixMode(GL11.GL_MODELVIEW);
+            for (int d = GL11.glGetInteger(GL11.GL_MODELVIEW_STACK_DEPTH); d > depth; d--) {
+                GL11.glPopMatrix();
+            }
+        }
+    }
+
+    /** What was drawn on a canvas (RGBA, rows bottom-up): x0, y0, x1, y1 inclusive, rows top-down; null when nothing. */
+    private static int[] bounds(byte[] rgba, int width, int height) {
+        int x0 = width, y0 = height, x1 = -1, y1 = -1;
+        for (int row = 0; row < height; row++) {
+            int y = height - 1 - row;
+            for (int x = 0; x < width; x++) {
+                if (rgba[(row * width + x) * 4 + 3] != 0) {
+                    if (x < x0) x0 = x;
+                    if (x > x1) x1 = x;
+                    if (y < y0) y0 = y;
+                    if (y > y1) y1 = y;
+                }
+            }
+        }
+        return x1 < 0 ? null : new int[] { x0, y0, x1, y1 };
+    }
+
+    private int storeMob(int[] argb, int width, int height) throws Exception {
+        ByteBuffer bytes = ByteBuffer.allocate(argb.length * 4);
+        bytes.asIntBuffer().put(argb);
+        String hash = sha1(bytes.array());
+        Integer id = mobIds.get(hash);
+        if (id != null) {
+            return id.intValue();
+        }
+        String file = "mob-" + hash.substring(0, 16) + ".png";
+        if (imageDir != null) {
+            PngWriter.write(argb, width, height, new File(imageDir, file));
+        }
+        id = Integer.valueOf(mobs.size());
+        mobs.add(file);
+        mobIds.put(hash, id);
+        return id.intValue();
+    }
+
+    private void deleteMobCanvases() {
+        if (mobMeasure != null) mobMeasure.delete();
+        if (mobFrame != null) mobFrame.delete();
+        mobMeasure = null;
+        mobFrame = null;
+    }
+
+    // ------------------------------------------------------------------------------------- NEI Custom Diagram
+
+    /**
+     * An NEI Custom Diagram group, from its diagrams: each slot that holds components as a stack (its
+     * components as the permutations, its tooltip lines), the layout (slots, lines, labels) as the
+     * background and the other interactables (labels, buttons) as the foreground, with their text
+     * recorded. Diagrams differ in height ("h").
+     */
+    private Map<String, Object> captureDiagrams(Object handler, Map<String, Object> out, int width, int height, long deadline) {
+        String className = handler.getClass().getName();
+        String id = String.valueOf(call(handler, "getHandlerId"));
+        Object loaded = call(handler, "getRecipeHandler", id, new Object[0]);
+        final Object state = field(loaded, "diagramState");
+        Object list = field(loaded, "diagrams");
+        List<?> diagrams = list instanceof List ? (List<?>) list : Collections.emptyList();
+        out.put("mode", "all");
+        int n = Math.min(diagrams.size(), MAX_RECIPES);
+        int[] heights = new int[n];
+        int w = width, tallest = height;
+        for (int r = 0; r < n; r++) {
+            heights[r] = number(call(loaded, "getRecipeHeight", Integer.valueOf(r)), height);
+            tallest = Math.max(tallest, heights[r]);
+            w = Math.max(w, number(call(call(diagrams.get(r), "dimension", state), "width"), 0));
+        }
+        Canvas canvas;
+        try {
+            canvas = new Canvas(w + 2 * MARGIN, tallest + 2 * MARGIN);
+        } catch (Throwable t) {
+            warn(className + ": no framebuffer: " + t);
+            out.put("status", "failed");
+            return out;
+        }
+        List<Object> recipes = new ArrayList<Object>();
+        int failures = 0;
+        Minecraft mc = Minecraft.getMinecraft();
+        FontRenderer realFont = mc.fontRenderer;
+        Object guiDrawFont = staticField("codechicken.lib.gui.GuiDraw", "fontRenderer");
+        try {
+            if (recorder == null) {
+                recorder = new RecordingFontRenderer(mc, realFont);
+            }
+            mc.fontRenderer = recorder;
+            setStatic("codechicken.lib.gui.GuiDraw", "fontRenderer", recorder);
+            for (int r = 0; r < n; r++) {
+                if (System.currentTimeMillis() > deadline) {
+                    out.put("truncated", Boolean.TRUE);
+                    break;
+                }
+                final Object d = diagrams.get(r);
+                try {
+                    Map<String, Object> recipe = new LinkedHashMap<String, Object>();
+                    List<Object> stacks = new ArrayList<Object>();
+                    for (Object i : iterable(call(d, "interactables", state))) {
+                        if (isA(i, COMPONENT_GROUP)) diagramStack(stacks, i);
+                    }
+                    recipe.put("s", stacks);
+                    recorder.lines.clear();
+                    List<Object> text = new ArrayList<Object>();
+                    int bg = canvas.draw(() -> call(d, "drawBackground", state));
+                    addText(text, recorder, 0);
+                    int fg = canvas.draw(() -> {
+                        for (Object i : iterable(field(d, "interactables"))) {
+                            if (!isA(i, COMPONENT_GROUP)) call(i, "draw", state);
+                        }
+                    });
+                    addText(text, recorder, 1);
+                    if (bg >= 0) recipe.put("bg", Integer.valueOf(bg));
+                    if (fg >= 0) recipe.put("fg", Integer.valueOf(fg));
+                    if (!text.isEmpty()) recipe.put("t", text);
+                    if (heights[r] != height) recipe.put("h", Integer.valueOf(heights[r]));
+                    recipes.add(recipe);
+                } catch (Throwable t) {
+                    failures++;
+                }
+            }
+        } catch (Throwable t) {
+            warn(className + ": " + t);
+        } finally {
+            mc.fontRenderer = realFont;
+            setStatic("codechicken.lib.gui.GuiDraw", "fontRenderer", guiDrawFont);
+            canvas.delete();
+        }
+        if (failures > 0) {
+            warn(className + " (" + id + "): " + failures + " diagrams failed to capture");
+        }
+        out.put("status", recipes.isEmpty() ? (failures > 0 ? "failed" : "empty") : "captured");
+        out.put("recipes", recipes);
+        return out;
+    }
+
+    /** One slot of a diagram (InteractiveComponentGroup): drawn as an item at its position less 8. */
+    private void diagramStack(List<Object> out, Object group) {
+        Object pos = call(group, "position");
+        List<Object> ids = new ArrayList<Object>();
+        List<Object> tip = null;
+        for (Object dc : iterable(field(group, "components"))) {
+            Object stack = call(dc, "stack");
+            Integer size = optionalInt(call(dc, "stackSize"));
+            int id = -1;
+            if (stack instanceof ItemStack) {
+                ItemStack s = ((ItemStack) stack).copy();
+                if (size != null) s.stackSize = size.intValue();
+                id = itemId(s);
+            } else if (stack instanceof FluidStack) {
+                FluidStack f = ((FluidStack) stack).copy();
+                if (size != null) f.amount = size.intValue();
+                if (f.getFluid() != null && f.amount > 0) id = fluidId(f);
+            }
+            if (id >= 0 && !ids.contains(Integer.valueOf(id))) ids.add(Integer.valueOf(id));
+            if (tip == null) {
+                tip = new ArrayList<Object>();
+                tip.addAll(tooltipLines(field(group, "slotTooltip")));
+                tip.addAll(tooltipLines(call(dc, "additionalTooltip")));
+            }
+        }
+        if (ids.isEmpty()) {
+            return;
+        }
+        Map<String, Object> s = new LinkedHashMap<String, Object>();
+        s.put("x", Integer.valueOf(number(call(pos, "x"), 8) - 8));
+        s.put("y", Integer.valueOf(number(call(pos, "y"), 8) - 8));
+        s.put("r", Integer.valueOf(2));
+        s.put("i", ids);
+        if (tip != null && !tip.isEmpty()) s.put("tip", tip);
+        out.add(s);
+    }
+
+    /** An NEI Custom Diagram Tooltip as lines of text with formatting codes (icons and spacing left out). */
+    private static List<String> tooltipLines(Object tooltip) {
+        List<String> out = new ArrayList<String>();
+        for (Object line : iterable(call(tooltip, "lines"))) {
+            StringBuilder b = new StringBuilder();
+            boolean text = false;
+            for (Object e : iterable(call(line, "elements"))) {
+                String type = String.valueOf(call(e, "type"));
+                Object v = null;
+                if ("TEXT".equals(type)) {
+                    v = call(e, "text");
+                    text = true;
+                } else if ("FORMATTING".equals(type)) {
+                    v = call(call(e, "formatting"), "format", "");
+                } else if ("COMPONENT_DESCRIPTION".equals(type)) {
+                    v = call(call(e, "componentDescription"), "description");
+                    text = true;
+                }
+                if (v != null) b.append(v);
+            }
+            if (text) out.add(b.toString());
+        }
+        return out;
+    }
+
+    /** An Optional's value as an Integer (java.util or Guava), or null. */
+    private static Integer optionalInt(Object optional) {
+        if (optional instanceof Integer) return (Integer) optional;
+        if (optional == null || !Boolean.TRUE.equals(call(optional, "isPresent"))) return null;
+        Object v = call(optional, "get");
+        return v instanceof Number ? Integer.valueOf(((Number) v).intValue()) : null;
+    }
+
+    private static int staticInt(String className, String name, int fallback) {
+        return number(staticField(className, name), fallback);
+    }
+
     // ------------------------------------------------------------------------------------- pictures
 
-    /** An off-screen framebuffer the size of a recipe (plus the margin), drawn at GUI scale 1. */
+    /**
+     * An off-screen framebuffer the size of a recipe (plus the margin), drawn at GUI scale 1; or of
+     * any GUI area at some pixels per GUI unit, with (originX, originY) at its top left corner.
+     */
     private final class Canvas {
 
+        /** Size in pixels. */
         final int width;
         final int height;
+        final int guiWidth;
+        final int guiHeight;
+        final int originX;
+        final int originY;
         final Framebuffer fb;
         final ByteBuffer pixels;
 
         Canvas(int width, int height) {
-            this.width = width;
-            this.height = height;
+            this(width, height, 1, MARGIN, MARGIN);
+        }
+
+        Canvas(int guiWidth, int guiHeight, int scale, int originX, int originY) {
+            this.guiWidth = guiWidth;
+            this.guiHeight = guiHeight;
+            this.width = guiWidth * scale;
+            this.height = guiHeight * scale;
+            this.originX = originX;
+            this.originY = originY;
             this.fb = new Framebuffer(width, height, true);
             this.pixels = BufferUtils.createByteBuffer(width * height * 4);
         }
@@ -726,10 +1246,10 @@ public final class NeiGenericCapture {
                 GL11.glClear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT);
                 GL11.glMatrixMode(GL11.GL_PROJECTION);
                 GL11.glLoadIdentity();
-                GL11.glOrtho(0.0D, width, height, 0.0D, 1000.0D, 3000.0D);
+                GL11.glOrtho(0.0D, guiWidth, guiHeight, 0.0D, 1000.0D, 3000.0D);
                 GL11.glMatrixMode(GL11.GL_MODELVIEW);
                 GL11.glLoadIdentity();
-                GL11.glTranslatef(MARGIN, MARGIN, -2000.0F);
+                GL11.glTranslatef(originX, originY, -2000.0F);
                 GL11.glEnable(GL11.GL_TEXTURE_2D);
                 GL11.glDisable(GL11.GL_LIGHTING);
                 GL11.glEnable(GL11.GL_ALPHA_TEST);
