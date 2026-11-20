@@ -27,6 +27,13 @@ test('animation frames follow the game tick clock', () => {
   assert.equal(frameAt(ticks, 300), 0);
 });
 
+test('a bouncing animation plays forwards, then back without repeating its ends', () => {
+  const ticks = [1, 1, 1, 1]; // 0 1 2 3 2 1 | 0 ...
+  const seq = [...Array(8).keys()].map((t) => frameAt(ticks, t * 50, true));
+  assert.deepEqual(seq, [0, 1, 2, 3, 2, 1, 0, 1]);
+  assert.deepEqual([0, 1, 2].map((t) => frameAt([2, 2], t * 50, true)), [0, 0, 1]);
+});
+
 test('randomFrame picks every sample, a new one about every display frame', () => {
   const seen = new Set<number>();
   let changes = 0;

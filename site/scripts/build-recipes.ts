@@ -28,7 +28,9 @@ import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { parseJsonFile, type Json, type JsonPath } from './jsonStream.ts';
-import type { NeiItems, NeiHandler, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiRecipe, GtLayout, MobPreview } from '../src/nei/model.ts';
+import type {
+  NeiItems, NeiHandler, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiRecipe, GtLayout, MobPreview, TooltipAnim,
+} from '../src/nei/model.ts';
 import { standardLines } from '../src/nei/text.ts';
 import { INDEX_SHARDS, shardOf } from '../src/nei/model.ts';
 import { gtLookup, type GtLookupExport } from './gtLookup.ts';
@@ -102,6 +104,8 @@ interface ListItemExport extends Res {
   group?: number;
   hidden?: boolean;
   tooltip?: string[];
+  /** Tooltip lines whose text changes over time (GTNHLib's animated tooltips): see TooltipAnim. */
+  tooltipAnim?: { line: number; lines: number; step: number; frames: [text: string, steps: number][] }[];
   rarity?: string;
   /** What NEI's identifier search (&) matches: "registry name\nid:damage", or "fluid name\nfluid id". */
   ident?: string;
@@ -449,7 +453,13 @@ console.timeEnd('read export');
 const listKeys: string[] = [];
 const listGroup: number[] = [];
 const tooltipOf = new Map<string, string[]>();
+const tooltipAnimOf = new Map<string, TooltipAnim[]>();
 const rarityOf = new Map<string, string>();
+/** NEI's fluid display stacks -> the fluid they show ("fluid:name"). */
+const fluidOf = new Map<string, string>();
+// Chromatic Tooltips' placeholders for lines it draws itself. Exports from before the exporter
+// resolved them have them in place of the text; without the text, leave the line out.
+const PLACEHOLDER = /^(\u00a7z\d+\u00a7Z|\u00a7Z\d+\u00a7z)$/;
 const identOf = new Map<string, string>();
 /** Position in the export's item list -> position in listKeys. */
 const listPos = new Map<number, number>();
@@ -461,7 +471,21 @@ for (const [pos, it] of (listExport?.items ?? []).entries()) {
   if (it.ident) identOf.set(k, it.ident);
   listKeys.push(k);
   listGroup.push(it.group ?? -1);
-  if (it.tooltip && it.tooltip.length > 1) tooltipOf.set(k, it.tooltip.slice(1));
+  if (it.tooltip && it.tooltip.length > 1) {
+    const lines = it.tooltip.slice(1);
+    if (lines.some((l) => PLACEHOLDER.test(l))) tooltipOf.set(k, lines.filter((l) => !PLACEHOLDER.test(l)));
+    else {
+      tooltipOf.set(k, lines);
+      // Line numbers as the site stores them: without the name.
+      const anim = (it.tooltipAnim ?? []).filter((a) => a.line >= 1).map((a) => ({ ...a, line: a.line - 1 }));
+      if (anim.length) tooltipAnimOf.set(k, anim);
+    }
+  }
+  if (it.registryId === 'NotEnoughItems:neiFluidDisplay' && it.ident) {
+    // ident is "<mod>:<fluid name>\n<fluid id>".
+    const first = it.ident.split('\n')[0];
+    fluidOf.set(k, `fluid:${first.slice(first.indexOf(':') + 1)}`);
+  }
   const rarity = /^\u00a7([0-9a-fk-or])$/i.exec(it.rarity ?? '')?.[1];
   if (rarity && rarity.toLowerCase() !== 'f') rarityOf.set(k, rarity.toLowerCase());
 }
@@ -898,8 +922,10 @@ if (listKeys.length) {
     }),
   );
   const lines: Record<number, string[]> = {};
+  const anim: Record<number, TooltipAnim[]> = {};
   const rarity: Record<number, string> = {};
   for (const [k, l] of tooltipOf) lines[indexOf.get(k)!] = l;
+  for (const [k, a] of tooltipAnimOf) anim[indexOf.get(k)!] = a;
   for (const [k, r] of rarityOf) rarity[indexOf.get(k)!] = r;
   // Ore names of each listed item (OreDictionary.getOreIDs): wildcard entries cover every meta.
   const listed = new Set(listKeys);
@@ -966,6 +992,7 @@ if (listKeys.length) {
     join(outDir, 'tooltips.json'),
     JSON.stringify({
       format: 1, lines, rarity, ores: oreNamesList, ore,
+      ...(Object.keys(anim).length ? { anim } : {}),
       ...(Object.keys(ids).length ? { ids } : {}),
       ...(Object.keys(idents).length ? { idents } : {}),
       ...(subsets.length ? { subsets } : {}),
@@ -1184,6 +1211,7 @@ const itemsOut: NeiItems = {
   modNames: modList,
   icons: iconOf,
   sheets: sheetSizes,
+  ...(fluidOf.size ? { fluid: Object.fromEntries([...fluidOf].map(([k, f]) => [indexOf.get(k)!, f])) } : {}),
   ore: oreList.map((n) => [n, (oreMembers.get(n) ?? []).map((k) => indexOf.get(k)).filter((i): i is number => i !== undefined)]),
 };
 writeFileSync(join(outDir, 'items.json'), JSON.stringify(itemsOut));

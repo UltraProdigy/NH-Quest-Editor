@@ -5,12 +5,13 @@
 // Optional env: DAILY_TAG (recorded as the data source).
 //
 // <icons dir>/quest/manifest.json, when present, has icons rendered from the exact stacks the quests
-// use (scripts/build-quests.ts --stacks); those replace the recipe export's icon for the same key and
-// add the stacks with NBT (keys "<id>@<dmg>#<hash>").
+// use (scripts/build-quests.ts --stacks) and the moving stacks of the recipe export; those replace
+// the recipe export's icon for the same key and add the stacks with NBT (keys "<id>@<dmg>#<hash>").
 //
 // Phase 1 only ships what the questbook references (quest/line icons, task and reward items,
 // their ore dictionary members, and the items of the vending machine trades in vending.json
-// beside <questbook.json>). The full item index comes with the recipe views.
+// beside <questbook.json>), plus every animated stack, so the recipe views can animate them too.
+// The full item index comes with the recipe views.
 
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
@@ -123,6 +124,7 @@ interface QuestIcon {
   t?: number;
   glint?: number;
   random?: number;
+  bounce?: number;
 }
 const questManifestFile = join(resolve(iconsArg), 'quest', 'manifest.json');
 const questIcons: Record<string, QuestIcon> = existsSync(questManifestFile)
@@ -141,6 +143,7 @@ for (const [key, q] of Object.entries(questIcons)) {
       info.f = q.frames;
       if (q.random) info.r = 1;
       else info.t = q.ticks;
+      if (q.bounce) info.b = 1;
     }
     if (q.lit) info.l = q.t ? 2 : 1;
     if (q.glint) info.g = 1;
@@ -207,6 +210,11 @@ for (const q of Object.values(book.quests)) {
 }
 for (const l of book.lines) if (l.icon) need(l.icon);
 if (vending) walkRefs(vending.groups.map((g) => g.trades));
+// Stacks the exporter found moving in the recipe and item list icons (it renders those through the
+// quest stack pass too), so the recipe views animate them like quest items.
+for (const [key, q] of Object.entries(questIcons)) {
+  if (q.icon && (q.frames ?? 1) > 1 && items.has(key)) needed.add(key);
+}
 // Fixed items drawn by the GUI itself.
 for (const id of ['minecraft:crafting_table', 'minecraft:furnace', 'minecraft:anvil', 'minecraft:experience_bottle']) {
   needWithWildcard(`${id}@0`);
@@ -235,6 +243,7 @@ for (const key of [...needed].sort()) {
     delete info.l;
     delete info.g;
     delete info.r;
+    delete info.b;
     noIcon++;
   }
   out[key] = info;

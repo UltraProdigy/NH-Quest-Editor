@@ -34,6 +34,37 @@ public final class IconPixels {
         return false;
     }
 
+    /** Whether any pixel may have the wrong alpha (see restoreOpacity): partly transparent, or invisible but coloured. */
+    public static boolean anyPartlyTransparent(int[] argb) {
+        for (int v : argb) {
+            int a = v >>> 24;
+            if (a != 255 && (a != 0 || (v & 0xFFFFFF) != 0)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * What a render leaves in the framebuffer's alpha is not always what reaches the screen: a layer
+     * drawn with blending off writes its own (vertex) alpha, and blending blends the alpha as well, so
+     * a solid block with a second layer (GregTech ores: the stone, then the ore) reads back partly
+     * transparent though the game shows it solid. {@code overWhite} is the same render over a white
+     * clear colour: wherever it has the colour of {@code overBlack}, no background shows through, so
+     * the pixel is made opaque.
+     */
+    public static void restoreOpacity(int[] overBlack, int[] overWhite) {
+        for (int i = 0; i < overBlack.length; i++) {
+            int b = overBlack[i];
+            int a = b >>> 24;
+            if (a == 255 || (a == 0 && (b & 0xFFFFFF) == 0)) continue;
+            int w = overWhite[i];
+            boolean same = true;
+            for (int c = 0; c <= 16 && same; c += 8) {
+                same = Math.abs(((b >> c) & 255) - ((w >> c) & 255)) <= 2;
+            }
+            if (same) overBlack[i] = b | 0xFF000000;
+        }
+    }
+
     /**
      * The smallest side, down to {@code minSide}, that a square {@code size} px image can be stored at
      * without losing anything: it is halved only while every block of pixels it merges has one colour

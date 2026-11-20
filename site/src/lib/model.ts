@@ -131,6 +131,8 @@ export interface ItemInfo {
    * are samples, and one is picked at random on every display frame.
    */
   r?: 1;
+  /** The frames are a stretch of a drift with the clock (shaders): played forwards, then back. */
+  b?: 1;
 }
 
 export interface ItemIndex {

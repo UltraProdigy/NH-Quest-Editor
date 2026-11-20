@@ -197,6 +197,7 @@ public final class ClientFluidStackIconRenderer {
             ICONS_BY_FLUID_KEY.put(key, "");
             return MaterializedFluidIconResult.SKIPPED;
         }
+        AnimatedStacks.noteFluid(stack, fluidIcon(stack));
 
         // At the smallest size that loses nothing, like the item icons.
         int side = IconPixels.losslessSide(pixels, ICON_SIZE, GUI_ICON_CANVAS_SIZE);

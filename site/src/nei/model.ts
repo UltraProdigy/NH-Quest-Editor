@@ -94,6 +94,8 @@ export interface NeiItems {
   sheets: number[];
   /** Ore dictionary entries the recipes use: [name, member item indexes]. */
   ore: [name: string, members: number[]][];
+  /** NEI's fluid display stacks: the fluid each shows ("fluid:name"), by item index. */
+  fluid?: Record<number, string>;
 }
 
 /** A ModularUI drawable the exporter read: a texture (or part of one), or just its class. */
@@ -242,6 +244,20 @@ export interface NeiTooltips {
   idents?: Record<number, string>;
   /** NEI's item subsets (%): full name and [start, length] runs of positions in the item list. */
   subsets?: [name: string, runs: number[]][];
+  /** Lines whose text changes over time, by item index. */
+  anim?: Record<number, TooltipAnim[]>;
+}
+
+/**
+ * Tooltip text that changes over time (GTNHLib's animated tooltips: GregTech's UXV+ tiers): the
+ * lines from `line` (an index into NeiTooltips.lines) spanning `lines` lines, sampled every `step` ms
+ * as [text, number of steps] runs that loop. Text with several lines has them joined by "\n".
+ */
+export interface TooltipAnim {
+  line: number;
+  lines: number;
+  step: number;
+  frames: [text: string, steps: number][];
 }
 
 export interface NeiRecipeChunk {

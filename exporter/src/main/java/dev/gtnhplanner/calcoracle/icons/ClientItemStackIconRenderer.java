@@ -141,6 +141,15 @@ public final class ClientItemStackIconRenderer {
 
     /** The stack drawn as the GUI draws it, as ARGB pixels (top row first), ICON_SIZE square. */
     static int[] renderStackPixels(ItemStack stack) throws Exception {
+        int[] pixels = renderStackPixels(stack, 0.0F);
+        if (IconPixels.anyPartlyTransparent(pixels)) {
+            IconPixels.restoreOpacity(pixels, renderStackPixels(stack, 1.0F));
+        }
+        return pixels;
+    }
+
+    /** One render over a clear colour of grey level {@code background} (alpha 0). */
+    private static int[] renderStackPixels(ItemStack stack, float background) throws Exception {
         Minecraft minecraft = Minecraft.getMinecraft();
         if (minecraft == null || minecraft.getTextureManager() == null) {
             throw new IllegalStateException("Minecraft client is not ready.");
@@ -160,8 +169,9 @@ public final class ClientItemStackIconRenderer {
             framebuffer.bindFramebuffer(true);
 
             GL11.glViewport(0, 0, ICON_SIZE, ICON_SIZE);
-            GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
+            GL11.glClearColor(background, background, background, 0.0F);
             GL11.glClear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT);
+            GL11.glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
 
             GL11.glMatrixMode(GL11.GL_PROJECTION);
             GL11.glPushMatrix();
@@ -351,7 +361,7 @@ public final class ClientItemStackIconRenderer {
         private int rendered;
         private int cacheHits;
         private int skipped;
-        private boolean finished;
+        private boolean finished, rechecking;
 
         private final long startedAt = System.nanoTime();
 
@@ -379,6 +389,14 @@ public final class ClientItemStackIconRenderer {
             // As many icons as fit in the frame budget rather than a fixed count: every frame in
             // between also draws the game behind this screen, so fewer, fuller frames waste less.
             long frameStart = System.nanoTime();
+            AnimatedStacks.newFrame();
+            if (rechecking) {
+                if (AnimatedStacks.recheckCustomRenderers(ICON_FRAME_BUDGET_MS * 1000000L)) {
+                    finished = true;
+                    finish();
+                }
+                return;
+            }
             while (iterator.hasNext() && System.nanoTime() - frameStart < ICON_FRAME_BUDGET_MS * 1000000L) {
                 Map.Entry<String, ItemStack> entry = iterator.next();
                 processed++;
@@ -417,38 +435,42 @@ public final class ClientItemStackIconRenderer {
             }
 
             if (!iterator.hasNext()) {
-                finished = true;
                 writeIconMap();
-                GtnhCalcOracleMod.LOG.info(
-                    "GTNH item icon batch finished: rendered "
-                        + rendered
-                        + ", cache "
-                        + cacheHits
-                        + ", skipped "
-                        + skipped
-                        + " in "
-                        + (System.nanoTime() - startedAt) / 1000000000L
-                        + " s (render "
-                        + renderNanos / 1000000000L
-                        + " s, checks and shrinking "
-                        + processNanos / 1000000000L
-                        + " s, handing to the PNG writer "
-                        + writeNanos / 1000000000L
-                        + " s; the rest is the frames in between)."
-                );
-                ClientFluidStackIconRenderer.exportQueuedIconsThen(new Runnable() {
-                    @Override
-                    public void run() {
-                        QuestStackIconExporter.exportThen(new Runnable() {
-                            @Override
-                            public void run() {
-                                mc.displayGuiScreen(null);
-                                afterExport.run();
-                            }
-                        });
-                    }
-                });
+                // Next frames: the custom-rendered stacks again, to see which of them move.
+                rechecking = true;
             }
+        }
+
+        private void finish() {
+            GtnhCalcOracleMod.LOG.info(
+                "GTNH item icon batch finished: rendered "
+                    + rendered
+                    + ", cache "
+                    + cacheHits
+                    + ", skipped "
+                    + skipped
+                    + " in "
+                    + (System.nanoTime() - startedAt) / 1000000000L
+                    + " s (render "
+                    + renderNanos / 1000000000L
+                    + " s, checks and shrinking "
+                    + processNanos / 1000000000L
+                    + " s, handing to the PNG writer "
+                    + writeNanos / 1000000000L
+                    + " s; the rest is the frames in between)."
+            );
+            ClientFluidStackIconRenderer.exportQueuedIconsThen(new Runnable() {
+                @Override
+                public void run() {
+                    QuestStackIconExporter.exportThen(new Runnable() {
+                        @Override
+                        public void run() {
+                            mc.displayGuiScreen(null);
+                            afterExport.run();
+                        }
+                    });
+                }
+            });
         }
     }
 
@@ -493,10 +515,14 @@ public final class ClientItemStackIconRenderer {
         }
 
         long start = System.nanoTime();
+        AnimatedStacks.beforeRender();
         int[] pixels = renderStackPixels(stack);
+        AnimatedStacks.afterRender(stack, pixels);
         long rendered = System.nanoTime();
         applyMissingItemTint(stack, pixels);
+        int[] single = pixels;
         pixels = renderWithContainerBaseIfNeeded(stack, pixels);
+        if (pixels != single) AnimatedStacks.newFrame();
         if (!IconPixels.anyVisible(pixels) || looksLikeMissingTexture(pixels)) {
             ICONS_BY_STACK_KEY.put(key, "");
             renderNanos += rendered - start;

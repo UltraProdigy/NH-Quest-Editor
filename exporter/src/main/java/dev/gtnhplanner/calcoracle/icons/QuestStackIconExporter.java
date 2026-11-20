@@ -69,6 +69,8 @@ import org.lwjgl.opengl.GL12;
  * <li>{@code glint}: the enchantment glint was taken out of the layers; the site draws it.</li>
  * <li>{@code random}: the stack looks different on every render (Infinity's pulse, Six-Phased Copper's
  * glitch); the frames are samples and the site shows a random one on every display frame.</li>
+ * <li>{@code bounce}: the stack drifts with the clock (shaders); the frames are a stretch of it, which
+ * the site plays forwards and back.</li>
  * </ul>
  *
  * <p>Layers are stored at the smallest of 32, 64, 128 or 256 px that loses nothing: a layer is
@@ -96,6 +98,11 @@ public final class QuestStackIconExporter {
     private static final long RANDOM_CHECK_MS = 12L;
     /** Real time between the frames kept of such a stack. */
     private static final long RANDOM_FRAME_SPACING_MS = 23L;
+    /** Renders kept of a stack that drifts with the clock, and the game ticks between them. */
+    private static final int DRIFT_FRAMES = 20;
+    private static final int DRIFT_TICKS = 2;
+    /** Largest strip kept for a drift; above it the stack stays still. */
+    private static final long MAX_DRIFT_BYTES = Long.getLong("gtnh.oracle.maxDriftBytes", 2500000L);
     private static final long FRAME_BUDGET_MS = 250L;
     private static final ResourceLocation GLINT = new ResourceLocation("textures/misc/enchanted_item_glint.png");
 
@@ -120,26 +127,48 @@ public final class QuestStackIconExporter {
 
     private QuestStackIconExporter() {}
 
-    /** Runs the quest stack pass if a stack list was given, then {@code after}. */
+    /**
+     * Runs the quest stack pass over the stack list given, if any, and the moving stacks the icon pass
+     * found (AnimatedStacks), then {@code after}.
+     */
     public static void exportThen(Runnable after) {
         String path = System.getProperty("gtnh.oracle.questStacks");
         Minecraft minecraft = Minecraft.getMinecraft();
-        if (path == null || path.trim().isEmpty() || minecraft == null) {
+        if (minecraft == null) {
             after.run();
             return;
         }
         List<JsonObject> entries = new ArrayList<JsonObject>();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (!line.isEmpty()) entries.add(JsonParser.parseString(line).getAsJsonObject());
+        java.util.Set<String> keys = new java.util.HashSet<String>();
+        if (path != null && !path.trim().isEmpty()) {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty()) continue;
+                    JsonObject entry = JsonParser.parseString(line).getAsJsonObject();
+                    entries.add(entry);
+                    if (entry.has("k")) keys.add(entry.get("k").getAsString());
+                }
+            } catch (Throwable t) {
+                GtnhCalcOracleMod.LOG.error("Could not read the quest stack list " + path + "; skipping quest icons.", t);
+                entries.clear();
+                keys.clear();
             }
-        } catch (Throwable t) {
-            GtnhCalcOracleMod.LOG.error("Could not read the quest stack list " + path + "; skipping quest icons.", t);
+        }
+        int extra = 0;
+        for (Map.Entry<String, JsonObject> e : AnimatedStacks.ENTRIES.entrySet()) {
+            if (keys.add(e.getKey())) {
+                entries.add(e.getValue());
+                extra++;
+            }
+        }
+        if (entries.isEmpty()) {
             after.run();
             return;
         }
+        GtnhCalcOracleMod.LOG.info("Quest stack pass: " + (entries.size() - extra) + " quest stacks, " + extra
+            + " moving stacks from the recipe and item list icons.");
         minecraft.displayGuiScreen(new ExportScreen(entries, after));
     }
 
@@ -150,7 +179,7 @@ public final class QuestStackIconExporter {
         private final Map<String, String> manifest = new LinkedHashMap<String, String>();
         private final File outDir = new File(ClientItemStackIconRenderer.iconDir(), "quest");
         private int index;
-        private int rendered, lit, animated, random, clockDriven, tooLong, glint, noItem, invisible, failed;
+        private int rendered, lit, animated, random, drifting, clockDriven, tooLong, glint, noItem, invisible, failed;
         private boolean finished;
         private final long startedAt = System.nanoTime();
 
@@ -179,7 +208,7 @@ public final class QuestStackIconExporter {
                     GtnhCalcOracleMod.LOG.info(
                         "GTNH quest stack icon progress " + index + "/" + entries.size() + " (rendered " + rendered
                             + ", lit " + lit + ", animated " + animated + ", random " + random
-                            + ", clock-driven still " + clockDriven + ", too long " + tooLong + ", glint " + glint
+                            + ", drifting " + drifting + ", clock-driven still " + clockDriven + ", too long " + tooLong + ", glint " + glint
                             + ", no item " + noItem + ", invisible " + invisible + ", failed " + failed + ").");
                 }
             }
@@ -253,14 +282,27 @@ public final class QuestStackIconExporter {
                 // clock-driven effect. Keep samples of it as they are and drop the lighting split above,
                 // which compares renders and mistakes those changes for lighting. (Checked after the
                 // lighting renders, so that the wait for the clock to move is mostly spent already.)
-                List<int[]> samples = mayGlint ? null : randomSamples(stack, base, renderedAt);
-                if (samples != null) {
+                Samples sampled = mayGlint ? null : randomSamples(stack, base, renderedAt);
+                if (sampled != null) {
+                    List<int[]> samples = sampled.frames;
                     String file = ClientItemStackIconRenderer.sha1(key).substring(0, 16) + ".png";
-                    writeStrip(new File(outDir, file), samples);
+                    File strip = new File(outDir, file);
+                    writeStrip(strip, samples);
+                    if (sampled.drift && strip.length() > MAX_DRIFT_BYTES) {
+                        // Shader noise barely compresses: past this, a still icon is the better trade.
+                        samples = samples.subList(0, 1);
+                        writeStrip(strip, samples);
+                    }
                     StringBuilder json = new StringBuilder();
                     json.append("{\"name\":").append(jsonString(name)).append(",\"icon\":")
                         .append(jsonString("quest/" + file));
-                    if (samples.size() > 1) {
+                    if (samples.size() > 1 && sampled.drift) {
+                        json.append(",\"frames\":").append(samples.size()).append(",\"ticks\":[");
+                        for (int i = 0; i < samples.size(); i++) json.append(i > 0 ? "," : "").append(DRIFT_TICKS);
+                        json.append("],\"bounce\":1");
+                        drifting++;
+                        animated++;
+                    } else if (samples.size() > 1) {
                         json.append(",\"frames\":").append(samples.size()).append(",\"random\":1");
                         random++;
                         animated++;
@@ -513,15 +555,27 @@ public final class QuestStackIconExporter {
         return -1;
     }
 
+    /** Renders of a stack that changes by itself: samples to pick from at random, or a stretch of a drift. */
+    private static final class Samples {
+        final List<int[]> frames;
+        final boolean drift;
+
+        Samples(List<int[]> frames, boolean drift) {
+            this.frames = frames;
+            this.drift = drift;
+        }
+    }
+
     /**
      * Renders the stack again, {@link #RANDOM_CHECK_MS} after {@code first} and without advancing
      * the game. Null if nothing changed. Otherwise {@link #RANDOM_FRAMES} renders taken
-     * {@link #RANDOM_FRAME_SPACING_MS} apart:
-     * when they jump about (Infinity's random pulse, Six-Phased Copper's glitch), all of them, for the
-     * site to pick from at random; when they drift smoothly with the clock (the Universium and cosmic
-     * shaders, which loop only every few minutes), just the first, as a still icon.
+     * {@link #RANDOM_FRAME_SPACING_MS} apart: when they jump about (Infinity's random pulse,
+     * Six-Phased Copper's glitch), all of them, for the site to pick from at random. When they drift
+     * smoothly with the clock (the Universium and cosmic shaders, which loop only every few minutes),
+     * {@link #DRIFT_FRAMES} renders {@link #DRIFT_TICKS} ticks apart instead, which the site plays
+     * forwards and back.
      */
-    private static List<int[]> randomSamples(ItemStack stack, int[] first, long firstAt) throws Exception {
+    private static Samples randomSamples(ItemStack stack, int[] first, long firstAt) throws Exception {
         long wait = firstAt + RANDOM_CHECK_MS - System.currentTimeMillis();
         if (wait > 0) sleep(wait);
         int[] again = render(stack, Lights.GUI);
@@ -537,11 +591,16 @@ public final class QuestStackIconExporter {
         for (int k = RANDOM_FRAMES / 2; k < RANDOM_FRAMES; k++) far += differingPixels(out.get(0), out.get(k));
         far /= RANDOM_FRAMES - RANDOM_FRAMES / 2;
         if (far > 2 * Math.max(near, 16L)) {
-            List<int[]> still = new ArrayList<int[]>();
-            still.add(first);
-            return still;
+            List<int[]> drift = new ArrayList<int[]>();
+            long start = System.currentTimeMillis();
+            for (int i = 0; i < DRIFT_FRAMES; i++) {
+                long due = start + i * DRIFT_TICKS * 50L - System.currentTimeMillis();
+                if (due > 0) sleep(due);
+                drift.add(render(stack, Lights.GUI));
+            }
+            return new Samples(drift, true);
         }
-        return out;
+        return new Samples(out, false);
     }
 
     private static void sleep(long ms) throws InterruptedException {
@@ -664,14 +723,20 @@ public final class QuestStackIconExporter {
     private static int[] render(ItemStack stack, Lights lights) {
         long start = System.nanoTime();
         try {
-            return renderUntimed(stack, lights);
+            int[] pixels = renderUntimed(stack, lights, 0F);
+            if (IconPixels.anyPartlyTransparent(pixels)) {
+                // See IconPixels.restoreOpacity: solid blocks with a blended layer read back see-through.
+                IconPixels.restoreOpacity(pixels, renderUntimed(stack, lights, 1F));
+                renders++;
+            }
+            return pixels;
         } finally {
             renderNanos += System.nanoTime() - start;
             renders++;
         }
     }
 
-    private static int[] renderUntimed(ItemStack stack, Lights lights) {
+    private static int[] renderUntimed(ItemStack stack, Lights lights, float background) {
         Minecraft mc = Minecraft.getMinecraft();
         if (framebuffer == null) {
             framebuffer = new Framebuffer(SIZE, SIZE, true);
@@ -682,8 +747,9 @@ public final class QuestStackIconExporter {
             ClientItemStackIconRenderer.resetTessellator();
             framebuffer.bindFramebuffer(true);
             GL11.glViewport(0, 0, SIZE, SIZE);
-            GL11.glClearColor(0F, 0F, 0F, 0F);
+            GL11.glClearColor(background, background, background, 0F);
             GL11.glClear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT);
+            GL11.glClearColor(0F, 0F, 0F, 0F);
             GL11.glMatrixMode(GL11.GL_PROJECTION);
             GL11.glPushMatrix();
             projectionPushed = true;

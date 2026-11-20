@@ -51,12 +51,25 @@ export function lightScale(k: number): [number, number] {
   return LIGHTS.map((l) => r / Math.hypot(k * l[0], k * l[1], l[2])) as [number, number];
 }
 
-/** Frame shown at `ms` for frames lasting `ticks` game ticks each, looping from time 0. */
-export function frameAt(ticks: number[], ms: number): number {
-  const total = ticks.reduce((a, b) => a + b, 0);
-  if (total <= 0) return 0;
-  let t = Math.floor(ms / 50) % total;
-  for (let i = 0; i < ticks.length; i++) {
+/**
+ * Frame shown at `ms` for frames lasting `ticks` game ticks each, looping from time 0. With `bounce`
+ * the loop goes forwards and then back, without showing the end frames twice.
+ */
+export function frameAt(ticks: number[], ms: number, bounce = false): number {
+  const n = ticks.length;
+  const forward = ticks.reduce((a, b) => a + b, 0);
+  if (forward <= 0) return 0;
+  const back = bounce && n > 2 ? forward - ticks[0] - ticks[n - 1] : 0;
+  let t = Math.floor(ms / 50) % (forward + back);
+  if (t < forward) {
+    for (let i = 0; i < n; i++) {
+      if (t < ticks[i]) return i;
+      t -= ticks[i];
+    }
+    return 0;
+  }
+  t -= forward;
+  for (let i = n - 2; i >= 1; i--) {
     if (t < ticks[i]) return i;
     t -= ticks[i];
   }

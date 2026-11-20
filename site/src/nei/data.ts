@@ -6,7 +6,10 @@ import { type Gfx, keys as heldKeys } from '../gui/core.ts';
 import { animating, invalidate } from '../gui/frame.ts';
 import { drawString, stringWidth } from '../gui/font.ts';
 import { drawItemKey, itemInfo, preloadIcons, itemFallback } from '../gui/items.ts';
-import type { NeiItems, NeiHandlers, NeiHandler, NeiRecipe, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiList, NeiTooltips, MobPreview } from './model.ts';
+import type {
+  NeiItems, NeiHandlers, NeiHandler, NeiRecipe, NeiRecipeChunk, NeiIndexShard, Slot, SlotObj, NeiList, NeiTooltips, MobPreview,
+  TooltipAnim,
+} from './model.ts';
 import { shardOf } from './model.ts';
 
 const DIR = 'data/nei/';
@@ -348,10 +351,32 @@ export function itemTooltipLines(i: number): string[] {
   if (!tooltips) void loadTooltips();
   const rarity = tooltips?.rarity[i];
   const out = [(rarity ? `§${rarity}` : '') + itemName(i)];
-  for (const l of tooltips?.lines[i] ?? []) out.push(l.startsWith(TOOLTIP_HANDLER) ? l : `§7${l}§r`);
+  let lines = tooltips?.lines[i] ?? [];
+  const anim = tooltips?.anim?.[i];
+  if (anim) {
+    lines = [...lines];
+    // Replace from the last, so the line numbers of the earlier ones still hold.
+    for (const a of [...anim].sort((x, y) => y.line - x.line)) {
+      lines.splice(a.line, a.lines, ...animFrame(a, performance.now()).split('\n'));
+    }
+    animating();
+  }
+  for (const l of lines) out.push(l.startsWith(TOOLTIP_HANDLER) ? l : `§7${l}§r`);
   const mod = itemMod(i);
   if (mod) out.push(`§9§o${mod}`);
   return out;
+}
+
+/** The text an animated tooltip line shows at `ms`. */
+export function animFrame(a: TooltipAnim, ms: number): string {
+  const total = a.frames.reduce((n, f) => n + f[1], 0);
+  if (total <= 0) return a.frames[0]?.[0] ?? '';
+  let t = Math.floor(ms / a.step) % total;
+  for (const [text, steps] of a.frames) {
+    if (t < steps) return text;
+    t -= steps;
+  }
+  return a.frames[0][0];
 }
 
 /** GuiDraw.TOOLTIP_HANDLER: lines starting with it are drawn by code, not as text. */
@@ -392,6 +417,12 @@ export function drawNeiItem(gfx: Gfx, i: number, x: number, y: number, label = '
   // Stacks the quest pipeline rendered (animations, lighting, glint) look exactly like in game.
   if (itemInfo(key)?.i) {
     drawItemKey(gfx, key, x, y, 16, label);
+    return;
+  }
+  // NEI's fluid display stacks look like their fluid, which may move.
+  const fluid = items.fluid?.[i];
+  if (fluid && (itemInfo(fluid)?.f ?? 0) > 1) {
+    drawItemKey(gfx, fluid, x, y, 16, label);
     return;
   }
   const cell = items.icons[i];

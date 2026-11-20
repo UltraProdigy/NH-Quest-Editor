@@ -2698,9 +2698,12 @@ public final class GtnhCalcOracleExporter {
 
     private List<String> tooltipLines(ItemStack stack) {
         try {
-            List<?> rawTooltip = stack.getTooltip(null, false);
+            List<String> rawTooltip = new ArrayList<String>();
+            for (Object line : stack.getTooltip(null, false)) {
+                rawTooltip.add(String.valueOf(line));
+            }
             List<String> tooltip = new ArrayList<String>();
-            for (Object line : rawTooltip) {
+            for (Object line : dev.gtnhplanner.calcoracle.nei.TooltipComponents.expand(rawTooltip)) {
                 String text = String.valueOf(line).replaceAll("\\u00A7[0-9A-FK-ORa-fk-or]", "").trim();
                 if (text.length() > 0) {
                     tooltip.add(text);

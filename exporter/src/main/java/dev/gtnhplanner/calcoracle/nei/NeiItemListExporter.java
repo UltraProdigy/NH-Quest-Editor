@@ -59,6 +59,7 @@ public final class NeiItemListExporter {
 
         List<Object> items = new ArrayList<Object>();
         List<ItemStack> stacks = new ArrayList<ItemStack>();
+        List<TooltipComponents.Changing> changing = new ArrayList<TooltipComponents.Changing>();
         int tooltipFailures = 0;
         int identFailures = 0;
         Object identifiers = identifierFilter();
@@ -86,7 +87,7 @@ public final class NeiItemListExporter {
                 item.put("hidden", Boolean.TRUE);
             }
             try {
-                List<String> lines = tooltip(stack);
+                List<String> lines = TooltipComponents.expand(tooltip(stack), item, changing);
                 if (!lines.isEmpty()) {
                     item.put("tooltip", lines);
                 }
@@ -111,6 +112,7 @@ public final class NeiItemListExporter {
         if (tooltipFailures > 5) {
             warn(tooltipFailures + " tooltips failed");
         }
+        TooltipComponents.sample(changing);
         if (identifiers == null) {
             warn("no IdentifierFilter: the & search keeps registry names only");
         }

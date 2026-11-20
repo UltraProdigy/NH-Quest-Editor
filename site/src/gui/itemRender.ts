@@ -211,7 +211,7 @@ export function drawIcon(gfx: Gfx, img: HTMLImageElement, info: ItemInfo, x: num
     frame = randomFrame(info.f, gfx.now);
   } else if (info.f && info.f > 1 && info.t) {
     animating();
-    frame = frameAt(info.t, gfx.now);
+    frame = frameAt(info.t, gfx.now, info.b === 1);
   }
   let src: CanvasImageSource = img;
   let sy = frame * S;
